@@ -64,15 +64,39 @@ original game's database grew:
 ## Local setup
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env       # then fill it in
+
+./tools/localpg.ps1 start  # start the local database
 python -m db.migrate up
+python -m pytest tests/    # 29 tests, all against a real Postgres
 ```
 
-There is no local Postgres on this machine and no Docker. Point `DATABASE_URL`
-at the Railway instance's **public** URL for development — in the Railway
-dashboard, Postgres service → Variables → `DATABASE_PUBLIC_URL`. (The internal
-`DATABASE_URL` only resolves from inside Railway's network.)
+### The local database
+
+A portable **PostgreSQL 17.11** lives in `../localpg` — outside this repo and
+untracked. It is not a Windows service, needs no admin rights, and runs only
+while started. Port **55432**, so it cannot collide with a real install; trust
+auth on `127.0.0.1` only.
+
+```powershell
+./tools/localpg.ps1 start | stop | status | psql | log | reset
+```
+
+`reset` drops `gugame_dev`, recreates it and re-migrates from scratch — the
+fastest way to prove the migrations still work from nothing.
+
+To replace it, download PostgreSQL's zip-format Windows binaries, extract to
+`../localpg/pgsql`, then `initdb -D ../localpg/data -U postgres -A trust`.
+
+### Against Railway instead
+
+Point `DATABASE_URL` at the **public** URL — Railway dashboard, Postgres service
+→ Variables → `DATABASE_PUBLIC_URL`. The internal `DATABASE_URL` only resolves
+from inside Railway's network.
+
+> `tests/` writes to whatever `DATABASE_URL` names. Keep it on a scratch
+> database.
 
 ## Layout
 
@@ -82,6 +106,15 @@ db/
   migrate.py               # the migration runner
   migrations/
     0001_foundation.sql    # players, audit log, shared conventions
+    0002_path_system.sql   # paths, matchup chart, attainment tiers
+    0003_seed_path_data.sql
+    0004_techniques.sql    # techniques, typing, loadout
+    0005_bestiary.sql      # creatures, weakness overrides, discovery
+  lint.py                  # parse every migration, no database needed
+tools/
+  gen_path_seed.py         # regenerates 0003 from the design chart
+  localpg.ps1              # drives the local dev Postgres
+tests/                     # schema guarantees, against a real database
 ```
 
 ---
