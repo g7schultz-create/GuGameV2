@@ -260,3 +260,55 @@ Three constraints carry real weight here:
 - **The realm curve is entirely placeholder** — 1.9× per stage, 27 steps ending
   at ~9.3 billion cumulative. The design doc gives no curve.
 - Physique stat multipliers are first-pass balance guesses.
+
+---
+
+## Battles & the damage pipeline
+
+### Battle state
+
+- **`battles`** — turn-based fights: `pve`, `duel` (`dungeon` reserved; its
+  run/stage tables come later). `rng_seed` makes a disputed fight replayable.
+  CHECKs keep status honest: active ⟺ no end time, and a winner requires a
+  finished battle.
+- **`battle_combatants`** — exactly one of `player_id`/`species_id` per row.
+  `snapshot` freezes derived stats at battle start; combat reads the snapshot,
+  never the live tables, so a duel result still explains itself after both
+  players change builds. `RESTRICT` on players — battle history involves other
+  people, same reasoning as the audit log.
+- **`player_active_battle`** — the one-fight-at-a-time rule as a claim table;
+  the primary key *is* the enforcement. World boss attacks take no claim.
+- **`battle_actions`** — append-only log storing every resolved number
+  (base, attainment, matchup, damage), so history survives rebalancing and a
+  "why did that hit for 15,000?" is answered by reading the row.
+  `technique_id` is `SET NULL` (player-created moves cascade away with their
+  creator) but the name and numbers stay.
+- **`world_boss_instances` / `world_boss_contributions`** — deliberately *not*
+  battles: many players hitting one shared HP pool over hours is a different
+  shape. One living instance per species (partial unique index); `defeated`
+  requires HP exactly 0.
+
+### The damage pipeline, in the database
+
+The spec's damage flow is three SQL functions living next to the data they
+read — one implementation serving the bot, ad-hoc psql balance queries, and the
+tests, with no Python copy to drift:
+
+- `technique_attainment_bonus(player, technique)` — weight-averaged tier bonus;
+  missing attainment rows read as Uninitiated.
+- `technique_matchup_modifier(technique, species)` — sums each Path's
+  interaction from `creature_incoming_paths`, clamps to
+  [`matchup_penalty_floor`, `matchup_bonus_cap`]. Returns exactly −1 (immune)
+  only when *every* component Path is immune; one immune half of a dual-Path
+  move feeds −1.0 into the sum where the floor catches it.
+- `compute_technique_damage(player, technique, species, external, defense)` —
+  the whole pipeline, returning every intermediate stage. `external` is the
+  Dao Marks/equipment/buffs hook (pass 1 until those exist); defense is
+  diminishing-returns (`defense_scale` = 100 defense halves damage), and a
+  landed hit never rounds below 1 while zero-power and immune hits deal
+  exactly 0.
+
+The tests *are* the spec's worked examples: Blood Blade resolving to exactly
+15,000, the 50/50 and 70/30 dual-Path formulas, the +50% cap holding, and the
+full section-13 combat loop — attack, log, discover the weakness, read the
+bestiary, count unknown traits — as one test.
