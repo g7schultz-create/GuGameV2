@@ -1,0 +1,16 @@
+# Secrets — never commit a real connection string or bot token
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local scratch
+*.log
+/tmp/
+.DS_Store
