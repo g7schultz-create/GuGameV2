@@ -215,3 +215,48 @@ snapshots. "Unknown Traits: 2" is a count difference, not a stored number.
 
 `discovered_via` distinguishes learning it the hard way (`combat`) from deducing
 it with Wisdom Path (`insight`, spec §7) from being told (`shared`).
+
+---
+
+## Cultivation & physique
+
+The other two pillars. Both live in their own tables rather than as columns on
+`players` — that separation is the rule that stops `players` growing back into
+the 120-column table the original ended up with.
+
+- **`realms`** — 9 ranks × 3 stages. `cultivation_required` is cumulative, so
+  deriving a realm from a lifetime total is one indexed range scan, and
+  technique gating is just `techniques.rank <= realms.rank`.
+- **`player_cultivation`** — realm, cultivation total, essence/qi pools,
+  aptitude. Caps come from the realm rather than being copied here, so a
+  breakthrough takes effect the moment `realm_id` changes.
+- **`physiques` / `player_physique`** — innate bodies and the body pillar's
+  stat output. Equipment and buffs layer on at combat time; these columns are
+  this pillar's contribution only, never a cached grand total.
+
+### Training sessions
+
+`training_sessions` backs `/cultivate path:strength duration:8h`. A session is a
+*claim on a span of time*, resolved when the player returns — storing intent and
+paying out later is what makes duration meaningful and keeps a disconnect from
+costing anything.
+
+`path_code IS NULL` means pure training: full XP, no insight. Set means the
+focused trade — reduced XP (`path_cultivation_xp_rate` 0.85 /
+`path_physique_xp_rate` 0.80) for insight and a Dao Mark chance.
+
+Three constraints carry real weight here:
+
+- A **partial unique index** on `(player_id) WHERE resolved_at IS NULL` allows
+  only one active session. Without it, two racing commands both open a session
+  and both pay out for the same wall-clock hours.
+- Resolution is **all-or-nothing** — `resolved_at` and all three granted figures
+  are present together or absent together. Half-resolved rows are what quietly
+  double-pay.
+- Insight **requires a Path**, so a pure session cannot grant any.
+
+### Known gaps
+
+- **The realm curve is entirely placeholder** — 1.9× per stage, 27 steps ending
+  at ~9.3 billion cumulative. The design doc gives no curve.
+- Physique stat multipliers are first-pass balance guesses.
