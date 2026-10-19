@@ -340,7 +340,9 @@ def test_full_combat_loop(conn, make_player, make_technique, make_species):
 
     # Resolve the hit through the pipeline.
     base, attainment, matchup, _, final = conn.execute(
-        "SELECT * FROM compute_technique_damage(%s, %s, %s)",
+        "SELECT base_power, attainment_bonus, matchup_modifier, "
+        "       pre_defense, final_damage "
+        "FROM compute_technique_damage(%s, %s, %s)",
         (player_id, technique_id, species_id),
     ).fetchone()
     assert final == 15_000  # 10,000 * 1.20 * 1.25
@@ -408,7 +410,10 @@ def test_full_combat_loop(conn, make_player, make_technique, make_species):
         (species_id, player_id),
     ).fetchone()[0]
     # Strength has 7 chart entries against it; blood is known, 6 remain.
-    assert unknown == 6
+    # 7 since 0018: `wind -> strength: resistance` gives every Strength
+    # creature one more thing to learn. This number tracks the chart on
+    # purpose - it is how an unintended chart change gets noticed.
+    assert unknown == 7
 
     # End the battle and release the claim.
     conn.execute(
@@ -417,3 +422,86 @@ def test_full_combat_loop(conn, make_player, make_technique, make_species):
         (battle_id,),
     )
     conn.execute("DELETE FROM player_active_battle WHERE player_id = %s", (player_id,))
+
+
+def test_battle_open_measures_the_creature_exactly_once(conn):
+    """`battle_open` used to ask `creature_body_for` twice.
+
+    That function is VOLATILE by design - it rehearses a real `player_swing`
+    against the species to size the creature to what this cultivator actually
+    deals per round, so it rolls crits and extra strikes. Two calls were two
+    different numbers, one landing in `max_hp` and one in `current_hp`, and
+    whenever the second came out larger `battle_combatants_hp_within_cap`
+    rejected the row and the fight refused to start. Measured against a live
+    rank 17 cultivator: ten of twelve pairs differed, five of twelve failed -
+    about two fights in five, at random.
+
+    Worse, the cog reported it as "You have nothing left to fight with",
+    because a CHECK constraint failure is `check_violation` too. Players at
+    full health were told they had no health. 0554 measures once.
+
+    THIS COUNTS THE CALL SITES, which is the one assertion that cannot go
+    vacuous. The behavioural version below needs a cultivator whose swing
+    actually varies, and a fixture player has no crit or multi-hit source at
+    all - their `creature_body_for` is flat, so opening a hundred fights with
+    one would have proved nothing. That was the first version of this test and
+    it passed against the bug.
+    """
+    src = conn.execute(
+        "SELECT pg_get_functiondef(oid) FROM pg_proc "
+        "WHERE proname = 'battle_open' AND pronamespace = 'public'::regnamespace"
+    ).fetchone()[0]
+
+    calls = src.count("creature_body_for(")
+    assert calls == 1, (
+        f"battle_open calls creature_body_for {calls} times - a volatile "
+        "function asked twice is two different answers, and the second one "
+        "lands in current_hp"
+    )
+
+
+def test_a_creature_opens_at_full_health(conn, make_player, make_species):
+    """The invariant the doubled call was breaking.
+
+    Weaker than the call count above - this fixture's cultivator has no
+    variance to expose a second measurement - but it is the property players
+    actually depend on, and it costs one query.
+    """
+    who = make_player("Measured")
+    conn.execute(
+        "INSERT INTO player_cultivation (player_id, realm_id, cultivation) "
+        "SELECT %s, r.realm_id, r.cultivation_required FROM realms r "
+        "WHERE r.rank = 6 ORDER BY r.realm_id DESC LIMIT 1",
+        (who,),
+    )
+    conn.execute(
+        "INSERT INTO player_physique (player_id, physique_id) VALUES "
+        "(%s, (SELECT physique_id FROM physiques WHERE code = 'mortal_body'))",
+        (who,),
+    )
+    conn.execute(
+        "UPDATE player_physique SET max_hp = 500000, current_hp = 500000, "
+        "defense = 2000, strength = 40000 WHERE player_id = %s",
+        (who,),
+    )
+
+    species = make_species(
+        "rogue_who_stops_you", name="A Rogue Who Stops You", base_hp=50_000
+    )
+    conn.execute(
+        "UPDATE creature_species SET kind = 'rogue', rank = 6 WHERE species_id = %s",
+        (species,),
+    )
+
+    battle = conn.execute(
+        "SELECT battle_open(%s, %s)", (who, species)
+    ).fetchone()[0]
+
+    max_hp, current_hp = conn.execute(
+        "SELECT max_hp, current_hp FROM battle_combatants "
+        "WHERE battle_id = %s AND combatant_no = 1",
+        (battle,),
+    ).fetchone()
+    assert current_hp == max_hp, (
+        f"the creature opened at {current_hp} of {max_hp} health"
+    )

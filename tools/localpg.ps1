@@ -19,7 +19,11 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet('start', 'stop', 'status', 'psql', 'reset', 'log')]
-    [string]$Command = 'status'
+    [string]$Command = 'status',
+
+    # Only meaningful for `reset`: wipe the database even though real players
+    # exist in it.
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +57,27 @@ switch ($Command) {
         Get-Content $Log -Tail 40
     }
     'reset' {
+        # Refuse to drop a database that has players in it.
+        #
+        # `reset` is for a scratch database, and it stops being scratch the
+        # moment somebody registers a character through the bot. Wiping their
+        # progress to re-run an edited migration is never the right trade: the
+        # migrations are forward-only, so the fix is a NEW migration, not a
+        # rebuild. -Force is there for when the wipe is genuinely intended.
+        $players = (& "$Bin\psql.exe" -h 127.0.0.1 -p $Port -U postgres -d $Db `
+            -tAc "SELECT count(*) FROM players;" 2>$null)
+        if (-not $Force -and $players -and [int]$players -gt 0) {
+            Write-Error @"
+$Db holds $players player(s). Refusing to drop it.
+
+Those are real characters - resetting deletes them and they cannot be
+recovered. If you edited an already-applied migration, write a new one
+instead; that is what forward-only means.
+
+Re-run with -Force if you genuinely mean to wipe them.
+"@
+        }
+
         # Terminate stragglers first: DROP DATABASE fails outright if anything
         # still holds a connection, and a leftover psql is the usual culprit.
         & "$Bin\psql.exe" -h 127.0.0.1 -p $Port -U postgres -d postgres -c `

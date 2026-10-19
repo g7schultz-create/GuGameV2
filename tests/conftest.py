@@ -44,6 +44,12 @@ def conn():
 # ---------------------------------------------------------------------------
 # Builders. Each returns the new row's id so tests can wire records together
 # without repeating the same INSERT boilerplate.
+#
+# `code` is UNIQUE table-wide, and seeded canonical content shares that
+# namespace - so a fixture must not reuse a code a migration already claims
+# (`blood_blade`, `nine_distortion_wolf`, ...) or it collides the moment that
+# content is applied. Suffix fixture codes rather than naming them after the
+# content they stand in for.
 # ---------------------------------------------------------------------------
 
 _next_discord_id = iter(range(900_000_000_000_000_000, 999_999_999_999_999_999))

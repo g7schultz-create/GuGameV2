@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Path Harmony</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Alchemical mineral pigments: jade, copper, cinnabar - the three the
+     cauldron actually deals in - against a cool ink ground. */
+  :root {
+    --ink:      #f1f3f1;
+    --surface:  #ffffff;
+    --raised:   #e8ebe9;
+    --line:     #d3d9d6;
+    --text:     #16211f;
+    --muted:    #5d6d6b;
+    --jade:     #2f7d59;
+    --slate:    #6b7f83;
+    --copper:   #a8681c;
+    --cinnabar: #b03328;
+    --shadow:   0 1px 2px rgba(22, 33, 31, .06), 0 8px 24px rgba(22, 33, 31, .05);
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:      #0d1416;
+      --surface:  #151f21;
+      --raised:   #1c282a;
+      --line:     #27383a;
+      --text:     #dde5e3;
+      --muted:    #869897;
+      --jade:     #58c093;
+      --slate:    #8ea3a7;
+      --copper:   #d9963f;
+      --cinnabar: #e0665a;
+      --shadow:   0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink:      #0d1416;
+    --surface:  #151f21;
+    --raised:   #1c282a;
+    --line:     #27383a;
+    --text:     #dde5e3;
+    --muted:    #869897;
+    --jade:     #58c093;
+    --slate:    #8ea3a7;
+    --copper:   #d9963f;
+    --cinnabar: #e0665a;
+    --shadow:   0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 22px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* ---- masthead ---- */
+  .masthead { display: flex; flex-direction: column; gap: 10px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: Spectral, Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(34px, 6vw, 52px);
+    line-height: 1.05;
+    letter-spacing: -.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-family: Spectral, Georgia, serif;
+    font-size: 18px;
+    font-style: italic;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  /* ---- the four states ---- */
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .state { background: var(--surface); padding: 18px 18px 20px; display: flex;
+           flex-direction: column; gap: 6px; }
+  .state .value {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 26px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .state .term {
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    font-weight: 600;
+  }
+  .state p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .s-agree  .value, .s-agree  .term { color: var(--jade); }
+  .s-quiet  .value, .s-quiet  .term { color: var(--slate); }
+  .s-oneway .value, .s-oneway .term { color: var(--copper); }
+  .s-feud   .value, .s-feud   .term { color: var(--cinnabar); }
+
+  /* ---- sections ---- */
+  section { display: flex; flex-direction: column; gap: 16px; }
+  h2 {
+    font-family: Spectral, Georgia, serif;
+    font-weight: 600;
+    font-size: 25px;
+    margin: 0;
+    letter-spacing: -.01em;
+  }
+  .note { margin: 0; color: var(--muted); max-width: 66ch; font-size: 14.5px; }
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
+
+  /* ---- the ten agreements ---- */
+  .pairs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .pair {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--jade);
+    border-radius: 3px;
+    padding: 12px 14px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  }
+  .pair .who { font-weight: 500; }
+  .pair .who span { color: var(--muted); font-weight: 400; }
+  .pair .h {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--jade); font-size: 15px;
+  }
+
+  .callout {
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .callout .who { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 11px;
+  }
+
+  /* ---- search ---- */
+  .finder { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  input[type="search"] {
+    flex: 1 1 240px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--text);
+    font: inherit;
+    padding: 9px 12px;
+  }
+  input[type="search"]:focus-visible {
+    outline: 2px solid var(--jade);
+    outline-offset: 1px;
+  }
+  .count {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- path cards ---- */
+  .paths { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
+  .path {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--slate);
+    border-radius: 3px;
+    padding: 16px 18px 18px;
+    display: flex; flex-direction: column; gap: 12px;
+    box-shadow: var(--shadow);
+  }
+  /* The stripe is the worst thing in the card, not decoration. */
+  .path[data-worst="feud"]   { border-left-color: var(--cinnabar); }
+  .path[data-worst="oneway"] { border-left-color: var(--copper); }
+  .path[data-worst="none"]   { border-left-color: var(--jade); }
+  .path.hidden { display: none; }
+
+  .path header { display: flex; align-items: baseline; gap: 9px; }
+  .path h3 {
+    font-family: Spectral, Georgia, serif;
+    font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -.01em;
+  }
+  .path .tally {
+    margin-left: auto;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .band { display: flex; flex-direction: column; gap: 5px; }
+  .band .label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  }
+  .band .who { display: flex; flex-wrap: wrap; gap: 6px; }
+  .band .n {
+    font-size: 13.5px;
+    border-radius: 3px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    background: var(--raised);
+  }
+  .b-agree  .label { color: var(--jade); }
+  .b-feud   .label { color: var(--cinnabar); }
+  .b-oneway .label { color: var(--copper); }
+  .b-quiet  .label { color: var(--slate); }
+  .b-quiet p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .b-agree .n { border-color: var(--jade); }
+  .b-feud  .n { border-color: var(--cinnabar); }
+
+  footer {
+    color: var(--muted); font-size: 13px; max-width: 66ch;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .92em;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .path { transition: border-left-color .15s ease; }
+  }
+
+  html { color-scheme: light dark; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="eyebrow">Cauldron &amp; refining reference</div>
+    <h1>Which Paths sit together</h1>
+    <p class="standfirst">Every distinct pair of Paths in a pot is weighed, and the
+      results are added up. One feud can undo four agreements.</p>
+  </header>
+
+  <div class="legend">
+    <div class="state s-agree">
+      <div class="value">+6 &hellip; +12</div>
+      <div class="term">They agree</div>
+      <p>Ten hand-written affinities. The only pairs worth more than silence.</p>
+    </div>
+    <div class="state s-quiet">
+      <div class="value">+4</div>
+      <div class="term">No quarrel</div>
+      <p>The matchup chart says nothing about them. 434 of the 561 pairs.</p>
+    </div>
+    <div class="state s-oneway">
+      <div class="value">&minus;11</div>
+      <div class="term">One beats the other</div>
+      <p>A one-sided matchup. Costs the same in a pot whichever way it points.</p>
+    </div>
+    <div class="state s-feud">
+      <div class="value">&minus;22</div>
+      <div class="term">They fight both ways</div>
+      <p>Each has advantage over the other. Never put these in the same pot.</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>What that costs you</h2>
+    <p class="note">A brew or refinement starts at <strong>50</strong> harmony and adds
+      every pair. Six Paths make fifteen pairs, so a set with no quarrels is
+      <strong>+60</strong> before skill is counted. Swapping one quiet pair for a
+      mutual feud is a <strong>26-point</strong> swing &mdash; roughly what
+      thirty-five levels of Alchemy buys you.</p>
+    <p class="note">Same-Path pairs count as zero. Repetition is paid for
+      separately, by dominance.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>The ten that agree</h2>
+    <p class="note">Everything else is either silence or a fight. These are the
+      only pairs the game actively rewards.</p>
+    <div class="pairs"><div class="pair"><span class="who">🔩 Metal <span>&amp;</span> 🗡️ Sword</span><span class="h">+12</span></div><div class="pair"><span class="who">👻 Soul <span>&amp;</span> 📖 Wisdom</span><span class="h">+12</span></div><div class="pair"><span class="who">🪨 Earth <span>&amp;</span> 💪 Strength</span><span class="h">+10</span></div><div class="pair"><span class="who">🧊 Ice <span>&amp;</span> 💧 Water</span><span class="h">+10</span></div><div class="pair"><span class="who">🌑 Shadow <span>&amp;</span> 👻 Soul</span><span class="h">+10</span></div><div class="pair"><span class="who">🔥 Fire <span>&amp;</span> ☀️ Light</span><span class="h">+8</span></div><div class="pair"><span class="who">🍚 Food <span>&amp;</span> ☠️ Poison</span><span class="h">+8</span></div><div class="pair"><span class="who">💧 Water <span>&amp;</span> 🌿 Wood</span><span class="h">+8</span></div><div class="pair"><span class="who">🦴 Bone <span>&amp;</span> 💪 Strength</span><span class="h">+6</span></div><div class="pair"><span class="who">🔥 Fire <span>&amp;</span> 🍃 Wind</span><span class="h">+6</span></div></div>
+  </section>
+
+  <section>
+    <div class="callout">
+      <div class="eyebrow" style="color:var(--jade)">Quarrels with nothing</div>
+      <div class="who"><span class="chip">🌙 Dream</span><span class="chip">🍚 Food</span><span class="chip">🎨 Painting</span><span class="chip">💨 Qi</span><span class="chip">📜 Rule</span></div>
+      <p class="note">These five have no feud with any Path. They are the safe
+        filler for a pot that needs bulk without risking harmony.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Every Path, and who it fights</h2>
+    <div class="finder">
+      <input type="search" id="finder" placeholder="Filter by Path name&hellip;"
+             aria-label="Filter Paths by name" autocomplete="off">
+      <span class="count" id="count"></span>
+    </div>
+    <div class="paths" id="paths"><article class="path" data-worst="feud" data-search="blood blood human soul bone fire light poison star strength water wood"><header><span>🩸</span><h3>Blood</h3><span class="tally">10 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🧍 Human</span><span class="n">👻 Soul</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔥 Fire</span><span class="n">☀️ Light</span><span class="n">☠️ Poison</span><span class="n">⭐ Star</span><span class="n">💪 Strength</span><span class="n">💧 Water</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="oneway" data-search="bone bone blood enslavement light metal poison refinement soul sword transformation strength"><header><span>🦴</span><h3>Bone</h3><span class="tally">9 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">💪 Strength</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🔗 Enslavement</span><span class="n">☀️ Light</span><span class="n">🔩 Metal</span><span class="n">☠️ Poison</span><span class="n">🧪 Refinement</span><span class="n">👻 Soul</span><span class="n">🗡️ Sword</span><span class="n">🦋 Transformation</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="none" data-search="dream dream"><header><span>🌙</span><h3>Dream</h3><span class="tally">0 quarrels</span></header><div class="band b-quiet"><div class="label">No quarrel</div><p>33 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="earth earth fire lightning space wind wood shadow water strength"><header><span>🪨</span><h3>Earth</h3><span class="tally">7 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">💪 Strength</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔥 Fire</span><span class="n">⚡ Lightning</span><span class="n">🌀 Space</span><span class="n">🍃 Wind</span><span class="n">🌿 Wood</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🌑 Shadow</span><span class="n">💧 Water</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>25 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="enslavement enslavement formation human wisdom bone poison shadow soul star strength transformation"><header><span>🔗</span><h3>Enslavement</h3><span class="tally">10 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔯 Formation</span><span class="n">🧍 Human</span><span class="n">📖 Wisdom</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">☠️ Poison</span><span class="n">🌑 Shadow</span><span class="n">👻 Soul</span><span class="n">⭐ Star</span><span class="n">💪 Strength</span><span class="n">🦋 Transformation</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="fire fire earth ice poison shadow water wood blood metal refinement star light wind"><header><span>🔥</span><h3>Fire</h3><span class="tally">10 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">☀️ Light</span><span class="n">🍃 Wind</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🧊 Ice</span><span class="n">☠️ Poison</span><span class="n">🌑 Shadow</span><span class="n">💧 Water</span><span class="n">🌿 Wood</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🔩 Metal</span><span class="n">🧪 Refinement</span><span class="n">⭐ Star</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>21 other Paths.</p></div></article><article class="path" data-worst="none" data-search="food food poison"><header><span>🍚</span><h3>Food</h3><span class="tally">0 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">☠️ Poison</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>32 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="formation formation enslavement luck refinement space wisdom sword theft wind"><header><span>🔯</span><h3>Formation</h3><span class="tally">8 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔗 Enslavement</span><span class="n">🍀 Luck</span><span class="n">🧪 Refinement</span><span class="n">🌀 Space</span><span class="n">📖 Wisdom</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🗡️ Sword</span><span class="n">🥷 Theft</span><span class="n">🍃 Wind</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>25 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="heaven heaven human luck transformation"><header><span>🌩️</span><h3>Heaven</h3><span class="tally">3 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🧍 Human</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🍀 Luck</span><span class="n">🦋 Transformation</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>30 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="human human blood enslavement heaven luck theft shadow"><header><span>🧍</span><h3>Human</h3><span class="tally">6 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🔗 Enslavement</span><span class="n">🌩️ Heaven</span><span class="n">🍀 Luck</span><span class="n">🥷 Theft</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🌑 Shadow</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>27 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="ice ice fire strength transformation light metal wood water"><header><span>🧊</span><h3>Ice</h3><span class="tally">6 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">💧 Water</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔥 Fire</span><span class="n">💪 Strength</span><span class="n">🦋 Transformation</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">☀️ Light</span><span class="n">🔩 Metal</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="oneway" data-search="illusion illusion light luck poison space strength sword transformation water wind wisdom"><header><span>🎭</span><h3>Illusion</h3><span class="tally">10 quarrels</span></header><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">☀️ Light</span><span class="n">🍀 Luck</span><span class="n">☠️ Poison</span><span class="n">🌀 Space</span><span class="n">💪 Strength</span><span class="n">🗡️ Sword</span><span class="n">🦋 Transformation</span><span class="n">💧 Water</span><span class="n">🍃 Wind</span><span class="n">📖 Wisdom</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="oneway" data-search="light light blood bone ice illusion poison shadow space theft wisdom wood fire"><header><span>☀️</span><h3>Light</h3><span class="tally">10 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🔥 Fire</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🦴 Bone</span><span class="n">🧊 Ice</span><span class="n">🎭 Illusion</span><span class="n">☠️ Poison</span><span class="n">🌑 Shadow</span><span class="n">🌀 Space</span><span class="n">🥷 Theft</span><span class="n">📖 Wisdom</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>22 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="lightning lightning earth metal soul time transformation water"><header><span>⚡</span><h3>Lightning</h3><span class="tally">6 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🔩 Metal</span><span class="n">👻 Soul</span><span class="n">⏳ Time</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦋 Transformation</span><span class="n">💧 Water</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>27 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="luck luck formation human theft time wisdom heaven illusion"><header><span>🍀</span><h3>Luck</h3><span class="tally">7 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔯 Formation</span><span class="n">🧍 Human</span><span class="n">🥷 Theft</span><span class="n">⏳ Time</span><span class="n">📖 Wisdom</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🌩️ Heaven</span><span class="n">🎭 Illusion</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="metal metal lightning bone fire ice refinement soul wood sword"><header><span>🔩</span><h3>Metal</h3><span class="tally">7 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🗡️ Sword</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">⚡ Lightning</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔥 Fire</span><span class="n">🧊 Ice</span><span class="n">🧪 Refinement</span><span class="n">👻 Soul</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>25 other Paths.</p></div></article><article class="path" data-worst="none" data-search="painting painting"><header><span>🎨</span><h3>Painting</h3><span class="tally">0 quarrels</span></header><div class="band b-quiet"><div class="label">No quarrel</div><p>33 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="poison poison fire refinement wood blood bone enslavement illusion light shadow transformation wind food"><header><span>☠️</span><h3>Poison</h3><span class="tally">11 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🍚 Food</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔥 Fire</span><span class="n">🧪 Refinement</span><span class="n">🌿 Wood</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🦴 Bone</span><span class="n">🔗 Enslavement</span><span class="n">🎭 Illusion</span><span class="n">☀️ Light</span><span class="n">🌑 Shadow</span><span class="n">🦋 Transformation</span><span class="n">🍃 Wind</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>21 other Paths.</p></div></article><article class="path" data-worst="none" data-search="qi qi"><header><span>💨</span><h3>Qi</h3><span class="tally">0 quarrels</span></header><div class="band b-quiet"><div class="label">No quarrel</div><p>33 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="refinement refinement formation poison theft bone fire metal wind"><header><span>🧪</span><h3>Refinement</h3><span class="tally">7 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔯 Formation</span><span class="n">☠️ Poison</span><span class="n">🥷 Theft</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔥 Fire</span><span class="n">🔩 Metal</span><span class="n">🍃 Wind</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="none" data-search="rule rule"><header><span>📜</span><h3>Rule</h3><span class="tally">0 quarrels</span></header><div class="band b-quiet"><div class="label">No quarrel</div><p>33 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="shadow shadow fire earth enslavement human light poison star wisdom wood soul"><header><span>🌑</span><h3>Shadow</h3><span class="tally">9 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">👻 Soul</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔥 Fire</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🔗 Enslavement</span><span class="n">🧍 Human</span><span class="n">☀️ Light</span><span class="n">☠️ Poison</span><span class="n">⭐ Star</span><span class="n">📖 Wisdom</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="soul soul blood lightning strength sword bone enslavement metal wood wisdom shadow"><header><span>👻</span><h3>Soul</h3><span class="tally">8 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">📖 Wisdom</span><span class="n">🌑 Shadow</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🩸 Blood</span><span class="n">⚡ Lightning</span><span class="n">💪 Strength</span><span class="n">🗡️ Sword</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔗 Enslavement</span><span class="n">🔩 Metal</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>23 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="space space earth formation time illusion light sword wisdom"><header><span>🌀</span><h3>Space</h3><span class="tally">7 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🔯 Formation</span><span class="n">⏳ Time</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🎭 Illusion</span><span class="n">☀️ Light</span><span class="n">🗡️ Sword</span><span class="n">📖 Wisdom</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="star star transformation blood enslavement fire shadow theft time water wood"><header><span>⭐</span><h3>Star</h3><span class="tally">9 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🦋 Transformation</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🔗 Enslavement</span><span class="n">🔥 Fire</span><span class="n">🌑 Shadow</span><span class="n">🥷 Theft</span><span class="n">⏳ Time</span><span class="n">💧 Water</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>24 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="strength strength ice soul sword wisdom blood enslavement illusion transformation wind earth bone"><header><span>💪</span><h3>Strength</h3><span class="tally">9 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🦴 Bone</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🧊 Ice</span><span class="n">👻 Soul</span><span class="n">🗡️ Sword</span><span class="n">📖 Wisdom</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🔗 Enslavement</span><span class="n">🎭 Illusion</span><span class="n">🦋 Transformation</span><span class="n">🍃 Wind</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>22 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="sword sword soul strength transformation bone formation illusion space metal"><header><span>🗡️</span><h3>Sword</h3><span class="tally">7 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🔩 Metal</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">👻 Soul</span><span class="n">💪 Strength</span><span class="n">🦋 Transformation</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔯 Formation</span><span class="n">🎭 Illusion</span><span class="n">🌀 Space</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>25 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="theft theft human luck refinement formation light star wisdom"><header><span>🥷</span><h3>Theft</h3><span class="tally">7 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🧍 Human</span><span class="n">🍀 Luck</span><span class="n">🧪 Refinement</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🔯 Formation</span><span class="n">☀️ Light</span><span class="n">⭐ Star</span><span class="n">📖 Wisdom</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="time time lightning luck space star transformation wisdom"><header><span>⏳</span><h3>Time</h3><span class="tally">6 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">⚡ Lightning</span><span class="n">🍀 Luck</span><span class="n">🌀 Space</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">⭐ Star</span><span class="n">🦋 Transformation</span><span class="n">📖 Wisdom</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>27 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="transformation transformation ice star sword bone enslavement heaven illusion lightning poison strength time wood"><header><span>🦋</span><h3>Transformation</h3><span class="tally">12 quarrels</span></header><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🧊 Ice</span><span class="n">⭐ Star</span><span class="n">🗡️ Sword</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🦴 Bone</span><span class="n">🔗 Enslavement</span><span class="n">🌩️ Heaven</span><span class="n">🎭 Illusion</span><span class="n">⚡ Lightning</span><span class="n">☠️ Poison</span><span class="n">💪 Strength</span><span class="n">⏳ Time</span><span class="n">🌿 Wood</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>21 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="water water fire blood earth illusion lightning star ice wood"><header><span>💧</span><h3>Water</h3><span class="tally">6 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🧊 Ice</span><span class="n">🌿 Wood</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔥 Fire</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🪨 Earth</span><span class="n">🎭 Illusion</span><span class="n">⚡ Lightning</span><span class="n">⭐ Star</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>25 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="wind wind earth formation illusion poison refinement strength fire"><header><span>🍃</span><h3>Wind</h3><span class="tally">6 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">🔥 Fire</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🪨 Earth</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🔯 Formation</span><span class="n">🎭 Illusion</span><span class="n">☠️ Poison</span><span class="n">🧪 Refinement</span><span class="n">💪 Strength</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>26 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="wisdom wisdom enslavement formation luck strength illusion light shadow space theft time soul"><header><span>📖</span><h3>Wisdom</h3><span class="tally">10 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">👻 Soul</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🔗 Enslavement</span><span class="n">🔯 Formation</span><span class="n">🍀 Luck</span><span class="n">💪 Strength</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🎭 Illusion</span><span class="n">☀️ Light</span><span class="n">🌑 Shadow</span><span class="n">🌀 Space</span><span class="n">🥷 Theft</span><span class="n">⏳ Time</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>22 other Paths.</p></div></article><article class="path" data-worst="feud" data-search="wood wood earth fire poison blood ice light metal shadow soul star transformation water"><header><span>🌿</span><h3>Wood</h3><span class="tally">11 quarrels</span></header><div class="band b-agree"><div class="label">Agrees with</div><div class="who"><span class="n">💧 Water</span></div></div><div class="band b-feud"><div class="label">Fights both ways &minus;22</div><div class="who"><span class="n">🪨 Earth</span><span class="n">🔥 Fire</span><span class="n">☠️ Poison</span></div></div><div class="band b-oneway"><div class="label">One-sided &minus;11</div><div class="who"><span class="n">🩸 Blood</span><span class="n">🧊 Ice</span><span class="n">☀️ Light</span><span class="n">🔩 Metal</span><span class="n">🌑 Shadow</span><span class="n">👻 Soul</span><span class="n">⭐ Star</span><span class="n">🦋 Transformation</span></div></div><div class="band b-quiet"><div class="label">No quarrel</div><p>21 other Paths.</p></div></article></div>
+  </section>
+
+  <footer>
+    <div>Read from <code>pair_harmony()</code>, <code>path_affinities</code> and
+      <code>path_matchups</code>. The stripe on each card is the worst
+      relationship it has.</div>
+  </footer>
+
+</div>
+
+<script>
+  const finder = document.getElementById("finder");
+  const count = document.getElementById("count");
+  const cards = Array.from(document.querySelectorAll(".path"));
+
+  function apply() {
+    const q = finder.value.trim().toLowerCase();
+    let shown = 0;
+    for (const card of cards) {
+      const hit = !q || card.dataset.search.includes(q);
+      card.classList.toggle("hidden", !hit);
+      if (hit) shown++;
+    }
+    count.textContent = shown === cards.length
+      ? cards.length + " Paths"
+      : shown + " of " + cards.length + " Paths";
+  }
+
+  finder.addEventListener("input", apply);
+  apply();
+</script>
+
+</body>
+</html>

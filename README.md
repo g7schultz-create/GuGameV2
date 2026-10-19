@@ -65,11 +65,11 @@ original game's database grew:
 
 ```bash
 python -m pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env       # then fill it in
+cp .env.example .env       # then fill it in (see "Running the bot" below)
 
 ./tools/localpg.ps1 start  # start the local database
 python -m db.migrate up
-python -m pytest tests/    # 29 tests, all against a real Postgres
+python -m pytest tests/    # 154 tests, all against a real Postgres
 ```
 
 ### The local database
@@ -86,6 +86,14 @@ auth on `127.0.0.1` only.
 `reset` drops `gugame_dev`, recreates it and re-migrates from scratch — the
 fastest way to prove the migrations still work from nothing.
 
+> **`reset` refuses to run once the database holds players.** It is for a
+> scratch database, and it stops being scratch the moment somebody registers a
+> character through the bot. If you edited a migration that has already been
+> applied, the fix is a **new migration**, not a rebuild — that is what
+> forward-only means, and reaching for `reset` to dodge the checksum guard
+> costs every player their character. `-Force` is there for when the wipe is
+> genuinely intended.
+
 To replace it, download PostgreSQL's zip-format Windows binaries, extract to
 `../localpg/pgsql`, then `initdb -D ../localpg/data -U postgres -A trust`.
 
@@ -97,6 +105,184 @@ from inside Railway's network.
 
 > `tests/` writes to whatever `DATABASE_URL` names. Keep it on a scratch
 > database.
+
+---
+
+## Running the bot
+
+### One-time Discord setup
+
+1. **Create the application.** <https://discord.com/developers/applications> ->
+   *New Application*. Under **Bot**, *Reset Token* and copy the token into
+   `DISCORD_TOKEN` in `.env`. It is shown once.
+2. **Leave every privileged intent off.** The bot reads no message content and
+   needs no member list - it only answers slash commands - so none of the three
+   toggles apply and the application never needs verification for them.
+3. **Invite it.** *OAuth2 -> URL Generator*, scopes **`bot`** and
+   **`applications.commands`**, no permissions. Or go straight there, with your
+   own application ID:
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=0
+   ```
+
+   `applications.commands` is the scope that matters. A bot invited without it
+   connects fine and then has no commands, which looks like a broken sync.
+4. **Set `GUILD_ID`.** Enable *Developer Mode* (User Settings -> Advanced),
+   right-click the server, *Copy Server ID*. With it set, commands register to
+   that one server and appear immediately. Left blank they register globally
+   and take up to an hour to propagate - correct for release, painful while
+   iterating.
+
+### Starting it
+
+```bash
+./tools/localpg.ps1 start
+python -m db.migrate up
+python -m bot
+```
+
+The bot opens its database pool, loads the cogs and syncs the command tree
+before the gateway delivers a single event, so there is no window where a
+command can arrive against a half-started process. A bad `DATABASE_URL` is a
+startup failure rather than an error on the first command.
+
+`python -m bot` is what the `worker` line in `Procfile` runs, so Railway needs
+no separate configuration.
+
+> **Windows:** psycopg's async mode refuses to run on the default
+> `ProactorEventLoop`, so `bot/__main__.py` starts the bot on a selector loop
+> instead. Without that the bot logs in successfully and then fails on every
+> query.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/ping` | Gateway latency, database round trip, applied schema version. |
+| `/register` | Character creation: choose a Race, roll a Root and a Physique. |
+| `/profile [user]` | The character sheet, the cultivation bar, and what idle time just paid. |
+| `/paths [category]` | All 34 Paths, grouped. |
+| `/path` | Pick a Path from buttons: both directions of the chart, and your attainment. |
+| `/tiers` | The attainment ladder and what each tier is worth. |
+| `/techniques [rank]` | Canonical techniques, optionally by rank. |
+| `/technique <technique>` | One technique in full, including dual-Path weights. |
+| `/learn <technique>` | Learn one your realm allows. |
+| `/loadout` | Your slots and everything you know. |
+| `/equip <slot> <technique>` / `/unequip <slot>` | Fill or clear a slot. |
+| `/traits <kind>` | Every Race, Root or Physique, with the roll odds. |
+| `/rename <name>` | Rename your character. |
+| `/breakthrough` | Take the next realm, once the bar is full. |
+| `/physique` | Your body, and which of the three you are building. |
+| `/bodies` | The three ladders, and what each one costs. |
+| `/cultivation` | Rate, progress bar, and time to the next realm. |
+| `/tribulation` | Face the sky standing in the door of the next great realm. |
+| `/paydebt` | Settle what a failed tribulation left owed, and cultivate again. |
+| `/dao` | The Dao read off everything you have actually done. |
+| `/ascend` | Cross out of the eighteen realms, once the Sovereign Calamity is survived. |
+| `/venerable` | Understanding accrued against your stamped Dao, and the rung it reaches. |
+| `/focus` | Aim your cultivation at a Path, chosen from buttons. |
+| `/study <creature> [path]` | Deduce a creature's reaction with Wisdom Path. |
+| `/bestiary` | What you have met, and how much of each you still do not know. |
+| `/creature <creature>` | One species, showing only what you have discovered. |
+| `/damage <technique> <creature> [defense]` | The damage pipeline, stage by stage. |
+| `/where` | Your region, its danger, and what lives there. |
+| `/travel` | Pick a region from buttons. Takes real time. |
+| `/gather` | Forage the region for refining materials. |
+| `/hunt` | Find something in the region and fight it, a round at a time. |
+| `/battle` | The fight you are in the middle of. |
+| `/abandon` | Walk away from one you cannot finish. Not a duel — see `/yield`. |
+| `/duel [opponent]` | Draw on another cultivator, or take your turn in the duel you are in. They must accept. |
+| `/yield` | Give up a duel. It costs what losing costs. |
+| `/inventory [category]` | What you are carrying, split by economy. |
+| `/equipment` | Your gear page. Two manual slots, managed from it. |
+| `/manuals` | Every manual you are carrying. |
+| `/manual <manual>` | One manual in full. |
+| `/pages [path]` | The manual pages you are holding. |
+| `/refine` | Combine pages into a manual. |
+| `/trade <player>` | Swap manuals, pages, materials and Gu with another cultivator. |
+| `/gu` | Your Gu, and what fits in your aperture. |
+| `/gupedia <gu>` | Look one up. |
+| `/refinegu [gu]` | Turn materials into a Gu. |
+| `/alchemy` | Brew herbs into a pill. |
+| `/professions` | Your crafts, their levels, and how far the next one is. |
+| `/pills` | The pills you have brewed. |
+| `/explore` | Search the region for whatever was left lying around. |
+
+`/damage` reads `compute_technique_damage` directly, so it is a genuine dry run
+of what combat will do rather than a second implementation that agrees with the
+first until it stops agreeing.
+
+### `I hunt`
+
+Every command also answers to `I` — `I hunt`, `I gather`, `I dev ready`. There
+is no second copy of anything: `bot/cogs/prefix.py` adapts a Message into the
+small part of the Interaction surface a command body actually touches, which is
+ten things (`user`, `response.send_message`, `followup.send`,
+`original_response`, `is_done`, and the rest), checked against the whole tree.
+
+**Components are untouched by this.** Only the first response needs adapting —
+once the bot posts a message carrying a View, every button and select press
+produces a real Interaction, so pickers stay ephemeral and modals open
+normally. That is what keeps the adapter small enough to be honest about.
+
+**Silence is the default**, because the prefix is an English pronoun:
+
+- a command that takes no arguments runs only when nothing follows it, so
+  *"I travel a lot these days"* starts no journey;
+- an argument that will not convert is read as prose rather than answered with
+  a complaint.
+
+The command's own refusals *do* answer — once it is running, the player meant
+it. Nothing is ephemeral, because a plain message cannot be; anything that
+would have been private is posted as a reply instead. There is no autocomplete
+either, so `I gupedia big_strength_gu` wants the code, not the display name.
+
+#### It needs a switch only a human can throw
+
+Reading what somebody typed is the **MESSAGE CONTENT** privileged intent. Asking
+for it in code is half the arrangement; it also has to be enabled at
+**discord.com/developers/applications → your app → Bot → Privileged Gateway
+Intents**. Discord refuses the connection outright when the two halves
+disagree.
+
+So it is a fallback, not a requirement: `bot/__main__.py` asks for the intent,
+and starts a bot without it — and without the listener — if Discord says no,
+logging exactly which switch is missing. An optional convenience must not be
+able to keep the whole bot offline. The second attempt skips the command sync,
+because syncing an identical tree twice in one process costs a 60-second rate
+limit on every restart.
+
+The cost of holding the intent is worth stating: an application carrying it
+needs Discord's review once it reaches 100 servers.
+
+### Testing in a live server
+
+`/dev` is owner-only - the application owner, not server admins - and exists so
+a payout can be reached without waiting out the wall clock:
+
+| Command | What it does |
+|---|---|
+| `/dev sync` | Re-register the command tree without restarting. |
+| `/dev advance <hours>` | Move your last settled tick back, so idle time is owed. |
+| `/dev reroll` | Reopen character creation with a fresh set of rerolls. |
+| `/dev arrive` | Finish the journey you are on, now. |
+| `/dev ready` | Clear your gather and hunt cooldowns. |
+| `/dev insight <path> <amount>` | Grant Path insight. |
+| `/dev cultivation <amount>` | Grant cultivation, realm included. |
+| `/dev physique <physique>` | Take on a physique. |
+| `/dev wipe` | Hard-delete your character so `/register` can be tested again. |
+
+None of these are shortcuts around the real logic: `/dev advance` moves
+`last_tick_at` and leaves the next command to call
+`settle_passive_cultivation` exactly as it would have. What gets tested is the
+accrual itself, cap included.
+
+`tests/test_commands.py` invokes every command against a real database with a
+stand-in interaction, so a broken query fails in CI instead of showing up in
+Discord as "the application did not respond".
+
+---
 
 ## Layout
 
@@ -110,11 +296,79 @@ db/
     0003_seed_path_data.sql
     0004_techniques.sql    # techniques, typing, loadout
     0005_bestiary.sql      # creatures, weakness overrides, discovery
+    0006_cultivation_physique.sql
+    0007_battles.sql       # battle state, world bosses
+    0008_damage_pipeline.sql
+    0009_training.sql      # training rates and the payout functions
+    0010_starter_content.sql  # the first techniques and creatures
+    0011_races_and_roots.sql  # the two rolled creation traits
+    0012_physique_expansion.sql
+    0013_character_creation.sql  # player traits, and passive cultivation
+    0014_path_emoji.sql       # one emoji per Path, for buttons
+    0015_base_stats_and_creature_damage.sql
+    0016_world_and_travel.sql # regions, routes, where each player is
+    0017_materials_gathering_hunting.sql
+    0018_six_new_paths.sql    # wind, light, shadow, illusion, bone, star
+    0019_wind_resistance.sql
+    0020_metal_and_the_starter_roster.sql  # Metal's rows, and 46 creatures
+    0021_manuals.sql          # equippable manuals, two slots
+    0022_manual_percentages.sql  # every bonus a percent, budgeted by tier
+    0023_manual_pages.sql     # pages, and the empty drop tables
+    0024_page_owner_index.sql
+    0025_rogues_and_exploring.sql  # who carries pages, and /explore
+    0026_refinement.sql       # pages become manuals
+    0027_refine_fixes.sql
+    0028_starter_manual.sql   # ten rank 1 attacks, and the book everyone starts with
+    0029_starter_split.sql
+    0030_interactive_battles.sql  # rounds, qi, telegraphs, observe, flee
+    0031_battle_act_reveal.sql
+    0032_conclude_clamps_hp.sql
+    0033_trading.sql          # two piles, one swap, and the confirmation reset
+    0034_manual_garbage_collection.sql
+    0035_sweep_orphaned_manuals.sql
+    0036_gu.sql               # aperture capacity, effects as rows, 35 Gu
+    0037_gu_in_combat.sql     # strikes, criticals, penetration, steal, evasion
+    0038_gu_refinement.sql    # materials to Gu: base, secondary, auxiliaries
+    0039_recipe_reachability.sql
+    0040_roster_material_paths.sql
+    0041_trade_gu.sql         # the fourth pile
+    0042_material_emoji.sql   # what a find looks like
+    0043_emoji_defaults.sql
+    0044_breakthrough.sql     # the bottleneck, and taking a realm on purpose
+    0045_settle_reports_what_it_banked.sql
+    0046_body_paths.sql       # nine body ranks, three ways to climb them
+    0047_a_first_choice_is_always_open.sql
+    0048_divine_tier.sql      # a band between Mythic and Unique, with members
+    0049_the_middle_of_the_physique_ladder.sql
+    0050_epic_outranks_rare.sql
+    0051_bodies_stop_repeating_themselves.sql
+    0052_mythic_roots.sql
+    0053_physique_effects.sql # a body reaches manual refinement
+    0054_roots_for_the_unclaimed_paths.sql
+    0055_bodies_for_the_unclaimed_paths.sql
+    0056_regional_herbs.sql   # 35 herbs, seven tiers, one region each
+    0057_alchemy.sql          # herbs to pills, with no recipe list
+    0058_a_pill_reports_what_it_gave.sql
+    0059_pills_that_change_the_rate.sql   # boosts, as hours rather than a clock
+    0060_a_spent_boost_does_not_crash_the_settle.sql
+    0061_player_skills.sql    # three crafts, two tables, one view
+    0062_skill_buys.sql
   lint.py                  # parse every migration, no database needed
+bot/
+  __main__.py              # entry point: python -m bot
+  client.py                # startup order, command sync, error handling
+  config.py                # DISCORD_TOKEN, GUILD_ID
+  database.py              # the async pool (db/ stays synchronous)
+  players.py               # Discord account -> player row
+  lookups.py               # autocomplete and code resolution
+  formatting.py            # colours, numbers, durations, embeds
+  character.py             # the three traits: reading them, rendering them
+  pathpicker.py            # the paged Path buttons, shared by /focus and /path
+  cogs/                    # one module per system, mirroring db/migrations/
 tools/
   gen_path_seed.py         # regenerates 0003 from the design chart
   localpg.ps1              # drives the local dev Postgres
-tests/                     # schema guarantees, against a real database
+tests/                     # schema guarantees and every command, against a real database
 ```
 
 ---
@@ -123,15 +377,15 @@ tests/                     # schema guarantees, against a real database
 
 Combat is built on the Path Attainment & Weakness design. Three tables carry it:
 
-- **`paths`** — the 28 Path types. `combat` (21) use the matchup chart,
+- **`paths`** — the 34 Path types. `combat` (27) use the matchup chart,
   `special` (Human, Heaven) sit in the chart with bespoke rules on top, and
   `exotic` (Qi, Dream, Painting, Food, Rule) opt out via `uses_matchups = false`
   because their value comes from unique mechanics.
-- **`path_matchups`** — a directed attacker→defender chart, 108 rows. Both
+- **`path_matchups`** — a directed attacker→defender chart, 165 rows. Both
   columns of the design chart read from the attacker's side, so the two
   directions of a pairing are independent facts: `fire→wood` being an advantage
   says nothing about `wood→fire`. **Neutral is an absent row**, which keeps this
-  at 108 rows rather than 28×28 = 784.
+  at 165 rows rather than 34×34 = 1,156.
 - **`attainment_tiers`** — Uninitiated (0) through Supreme Grandmaster (10).
   `tier` is both the ordinal and the primary key, so "at least Grandmaster" is
   `tier >= 6`, an integer comparison rather than a name lookup.
@@ -146,11 +400,90 @@ Balance numbers live in rows, not in Python: magnitudes in
 +50% matchup cap in `game_config`. Retuning is an `UPDATE` in a new migration,
 not a code change.
 
+### The six added Paths
+
+Wind, Light, Shadow, Illusion, Bone and Star (0018) came from the monster
+roster, which names Paths the original 28 did not have. Adding a Path is an
+INSERT; what is not free is that a Path with no matchup rows is inert in both
+directions — the state Metal has been in since 0002 — so the rows shipped with
+the Paths.
+
+50 rows, chosen to **tighten** the chart rather than merely extend it. The
+spread of net position across all Paths falls from 2.20 to 1.25 and its
+standard deviation by roughly half, because the new Paths were pointed at the
+ones the chart had left behind: Wood, Blood, Refinement, Formation,
+Enslavement, Strength, Transformation, Water, Earth, Human, Poison and Theft
+each gain a fourth advantage here. That is why `test_matchup_chart_is_complete`
+now allows 2–4 advantages. **The resistance bound stays 2–3** — that is the
+half that keeps a Path answerable, and nothing was allowed to loosen it.
+
+Two rows differ from what the balance pass produced, both for reasons the
+numbers could not see:
+
+- **`wind → lightning` was dropped.** `creature_incoming_paths` resolves a
+  dual-typed creature by taking the most attacker-favourable *stored* row, and
+  neutral is an absent row, so it cannot compete. The Storm Eagle is
+  Wind/Lightning and `wind → wind` is banned as reflexive — so that single row
+  would have made the flagship Wind creature resist Wind. The Thunderhorn Goat
+  resisting Wind is a fact about the goat and belongs in
+  `creature_path_modifiers`. `wind → earth` replaced it in 0019.
+- **Bone's third advantage moved from Time to Soul.** Bone's targets were
+  Light, Time and Blood, and no creature in the game carries any of them — a
+  Bone cultivator would have dealt neutral damage to the entire bestiary. The
+  Metal wart, shipped on day one, in the layer that matters.
+
+### The body has a name now
+
+0006 built the physique pillar as one unbounded `body_level`, which tells a
+player how many times a number went up and nothing about what they are
+becoming. 0046 is the other half.
+
+**Rank is the name, level is the progress** — the arrangement cultivation
+already uses. `body_rank_for_xp` bands the same cumulative `physique_xp` into
+nine ranks; `body_level` still drives every stat, so nothing in the damage
+pipeline moved. The requirement is typed **nine times, not twenty-seven**:
+`body_rank_requirements` is the climb and `body_ranks` is the vocabulary, so a
+rebalance never touches a name and a rename never touches a number.
+
+**The path is a trade, not a bonus.** If aggressive and defensive do not cost
+anything then the words are decoration and everyone picks the same one:
+
+| | HP | Defence | Strength |
+|---|---|---|---|
+| ☯️ **Taoist** — balanced | +10% | +10% | +10% |
+| 👹 **Demonic** — aggressive | −10% | −15% | **+45%** |
+| 🪷 **Buddhist** — defensive | +25% | **+30%** | −25% |
+
+They join the existing additive stack beside the physique's own multipliers,
+the manuals and the Gu — a +10% race and a +45% Demonic body make +55%, never a
+product. On the live character that reads 180/35/48 bare and 162/30/70 Demonic.
+
+**And it sets.** A path may be changed freely at Rank 1 and never after, in a
+trigger rather than in whichever command happens to write the column.
+
+#### The rule was aimed at the wrong event
+
+0046 shipped that lock as *"only at Rank 1"* and locked out everybody already
+past it — which was everybody, the paths being new that minute. The thing that
+should set is **changing your mind**, not choosing at all:
+
+- no path yet → always allowed, the choice is still owed;
+- a path, at Rank 1 → allowed, the body is still forming;
+- a path, past Rank 1 → refused.
+
+`player_body.path_still_open` answers with the same rule the trigger enforces,
+so the screen can never draw a button the database would refuse. A test holds
+the two together, because a disagreement there is a button that lies.
+
+A migration arriving after the players do has to be readable by the players who
+were already here.
+
 ### Known gaps
 
-- **Metal Path has no offensive matchups.** It appears only as a *defender* in
-  the design chart (Lightning and Refinement beat it; it resists Sword), so
-  Metal techniques are currently neutral into everything.
+- **`tools/gen_path_seed.py` no longer regenerates the whole chart.** It still
+  reproduces 0003 byte-identically, but knows nothing of the six Paths added in
+  0018 or Metal's rows in 0020, so regenerating from it would produce the
+  original 28.
 - **`insight_required` is entirely placeholder** — the design doc gives no
   curve. Currently ~2.5× per tier.
 - **`resistance_bonus` above Grandmaster is placeholder.** Only the Grandmaster
@@ -224,9 +557,11 @@ The other two pillars. Both live in their own tables rather than as columns on
 `players` — that separation is the rule that stops `players` growing back into
 the 120-column table the original ended up with.
 
-- **`realms`** — 9 ranks × 3 stages. `cultivation_required` is cumulative, so
-  deriving a realm from a lifetime total is one indexed range scan, and
-  technique gating is just `techniques.rank <= realms.rank`.
+- **`realms`** — 71 rows: 18 ranks across 4 stages, topping out at 6.75e18
+  cumulative. `cultivation_required` is cumulative, so deriving a realm from
+  a lifetime total is one indexed range scan, and technique gating is just
+  `techniques.rank <= realms.rank`. **It stops at 18 on purpose** — see *The
+  realm above the realms* below.
 - **`player_cultivation`** — realm, cultivation total, essence/qi pools,
   aptitude. Caps come from the realm rather than being copied here, so a
   breakthrough takes effect the moment `realm_id` changes.
@@ -234,32 +569,1064 @@ the 120-column table the original ended up with.
   stat output. Equipment and buffs layer on at combat time; these columns are
   this pillar's contribution only, never a cached grand total.
 
-### Training sessions
+### Cultivation is idle
 
-`training_sessions` backs `/cultivate path:strength duration:8h`. A session is a
-*claim on a span of time*, resolved when the player returns — storing intent and
-paying out later is what makes duration meaningful and keeps a disconnect from
-costing anything.
+Cultivation accrues from the clock. `settle_passive_cultivation` computes what
+elapsed time is worth and is called at the top of every command that displays
+progress, so the bar is current whenever anybody looks at it.
 
-`path_code IS NULL` means pure training: full XP, no insight. Set means the
-focused trade — reduced XP (`path_cultivation_xp_rate` 0.85 /
-`path_physique_xp_rate` 0.80) for insight and a Dao Mark chance.
+Nothing ticks. There is no scheduler, so there is nothing to fall behind, and a
+bot that was down for a day still owes exactly what that day was worth —
+`player_cultivation.last_tick_at`, put there in 0006 for this, is the only
+state it needs.
 
-Three constraints carry real weight here:
+Two details carry the weight:
 
-- A **partial unique index** on `(player_id) WHERE resolved_at IS NULL` allows
-  only one active session. Without it, two racing commands both open a session
-  and both pay out for the same wall-clock hours.
-- Resolution is **all-or-nothing** — `resolved_at` and all three granted figures
-  are present together or absent together. Half-resolved rows are what quietly
-  double-pay.
-- Insight **requires a Path**, so a pure session cannot grant any.
+- **`last_tick_at` advances by what was paid, not to `now()`.** Idle time is
+  capped at `passive_cap_hours`; moving the marker forward only by the paid
+  span is what stops a capped player banking a silent debt that pays out later.
+- **A focus Path is the one decision.** Set it and cultivation drops to
+  `path_cultivation_xp_rate` (0.85) in exchange for insight into that Path and
+  the tier progression that follows — the same bargain the design's sections 10
+  and 11 describe. `/focus` settles before switching, so eight hours aimed at
+  Fire cannot pay out into Ice because the player changed their mind.
+
+### The bottleneck
+
+0009 wrote it down plainly — *"a breakthrough is a side effect of the total
+crossing a threshold rather than an action the player takes"* — and 0044
+reversed it, because **a tribulation cannot interrupt something that has
+already happened by the time anybody looked.**
+
+Cultivation now fills and stops. `apply_cultivation_xp` clamps the total at the
+next realm's requirement, and `realm_id` moves in exactly one place:
+`breakthrough()`. Time spent at a full bar buys nothing — that is what a
+bottleneck *is*, and it is what makes `/breakthrough` worth pressing.
+
+**This retires an invariant on purpose.** `realm_for_cultivation` was "the
+definition of `player_cultivation.realm_id`" and is not any more: between
+filling the bar and taking the realm, the stored realm is one behind what the
+total would derive. The clamp is what bounds that gap to exactly one — nobody
+can ever be two realms behind their own cultivation — and the function stays,
+because it is still the right answer to *what is this total worth*.
+
+The tribulation goes inside `breakthrough()`: a roll before the one statement
+that changes `realm_id`, and an outcome column on the way out. Nothing that
+calls it has to move.
+
+#### What the clamp broke immediately
+
+`settle_passive_cultivation` reported the cultivation it **calculated**, not
+the cultivation that was **stored**. Identical numbers for as long as nothing
+refused a deposit — then twelve idle hours against a full bar returned
+"+1,260 cultivation" and banked 260. A screen that overstates a reward is worse
+than one that shows nothing, so 0045 measures the payout instead: read the
+total, apply, read it again. The number on the card is the number in the column
+by construction, whatever else ever decides to clamp it.
+
+The suite caught it from the other end — `/profile` hides "Since you last
+looked" when nothing accrued, and a character at its ceiling stopped being
+shown a line it had been promised. That field now appears when **any** pillar
+moved, because at a bottleneck cultivation is the one that does not while the
+body carries on.
+
+`training_sessions` and `resolve_training_session` are still there, unused.
+They are the right shape for a timed *activity* — expeditions, seclusion,
+secret realms — and dropping a table to reclaim nothing is how you lose a
+design decision you will want back.
+
+### The realm above the realms
+
+Eighteen realms are a ladder of cultivation. The nineteenth is not. A
+**Venerable** advances by *understanding* the thing they already are, and
+what they are is read off what they have actually done.
+
+- **`venerable_ranks`** — 9 rungs, game-wide ranks 19 to 27, each with three
+  demands: a total understanding, a number of aspects, and a floor each of
+  those aspects must clear. It carries its own `gu_capacity`, `qi_capacity`
+  and `essence_capacity`, continuing the realm ladder's +3 aperture and
+  doubling pools off rank 18.
+- **`player_dao` / `player_dao_aspects`** — a Dao is *derived* on every read
+  until it is **stamped**, and fixed after. Stamping freezes the aspects and
+  their weights and takes a baseline reading of every deed counter;
+  understanding is movement away from that baseline, weighted per aspect. So
+  your Dao decides which of your deeds advance you.
+- Four of the six axes feed understanding — path casts, body levels, craft
+  levels and hours a worm has been carried. A root is rolled rather than
+  chosen and a destiny would need sixty hooks, so both stay aspects and feed
+  nothing.
+
+**Why it is a separate table and not more `realms` rows.** `breakthrough`
+walks `realms` by `realm_id + 1` and asks the next row for its
+`cultivation_required`. A rank 19 row there would have let it demand
+cultivation from somebody whose meter is understanding — the exact thing the
+Venerable ranks replace. So the two ladders stay separate and
+`player_standing(player)` is the one function that takes whichever is
+higher. Every gate that used to read `player_realm_rank` reads *that* now
+(0519), because six of them silently stopped working above 18.
+
+**The crossing.** `tribulation_standing` synthesises a door at the peak of
+the realm ladder, where there is no next row, and the Sovereign Calamity
+stands in it. Cultivation is not asked for — standing at the peak already
+means having paid every rung below. Surviving it lets `venerable_ascend`
+stamp the Dao, which *is* the ascension, and the sky grants the first rung
+outright: a cultivator who has just crossed holds no understanding yet.
+
+**And a failed sky leaves a debt** of `tribulation_failure_jade` (500),
+from `tribulation_debt_from_rank` (19) upward. While it is owed,
+`apply_cultivation_xp` banks nothing and the Venerable door stays shut —
+even after the retry is survived. The halt banks nothing rather than
+refusing, because `settle_passive_cultivation` goes through that same
+function and half the bot's screens run it before drawing anything.
+`cultivation_halt(player)` is the one definition of that sentence, read as a
+boolean by the guards and as a sentence by the screens.
+
+The rank floor is there because 500 jade means different things at
+different depths. Measured over fourteen days of `jade_ledger`: a realm 18
+cultivator earns it in **1.7 days**, a realm 6 one in 19, and a realm 1 one
+in **235**. Below the Venerable door the fee would not cost a character
+something, it would end it — so down there a failed sky still costs what it
+always did, the fight and eight hours. The floor is a `game_config` row, so
+reaching further down is an `UPDATE`.
 
 ### Known gaps
 
-- **The realm curve is entirely placeholder** — 1.9× per stage, 27 steps ending
-  at ~9.3 billion cumulative. The design doc gives no curve.
+- **The realm curve is entirely placeholder** — 1.9× per stage, 71 steps ending
+  at 6.75e18 cumulative. The design doc gives no curve.
 - Physique stat multipliers are first-pass balance guesses.
+- **Every accrual rate is placeholder** (0009, 0013): 100 cultivation/hour,
+  80 physique XP/hour, 60 insight/hour with a focus set, 500 physique XP per
+  body level, and a 24-hour idle cap. They are picked so an hour feels like it
+  did something and the first breakthrough is reachable in an evening, not
+  because the design says so. All of them are rows in `game_config`, so
+  retuning is an `UPDATE` in a new migration.
+- Dao Marks are not granted by idle cultivation. The design gives them to
+  focused training, and the roll exists in `resolve_training_session`; passive
+  accrual deliberately grants none until there is an activity worth attaching
+  the chance to.
+- **Starter content (0010) is a coverage set, not a game.** Ten techniques and
+  eight species, chosen so every branch the damage pipeline and the bestiary
+  view can take has content behind it - a dual-Path move, a species override, an
+  immunity, a world boss. The shapes are deliberate; the numbers are not.
+
+---
+
+## Manuals
+
+A manual does two things: it speeds cultivation while carried, and it unlocks
+the combat moves written in it. **Two may be equipped at once**, which is the
+whole decision — a Tier 4 cultivation scripture, or the book that teaches the
+move you actually need.
+
+### Everyone starts with one
+
+Confirming a character grants a **randomly generated Tier 1 manual**, equipped
+into the first slot. Before 0028 a new cultivator knew no techniques at all, so
+`pick_technique` returned nothing and every creature in the world answered
+`/hunt` with *you cannot fight* — a tutorial step disguised as a dead end.
+
+A manual rather than a learned technique, because manuals are already the thing
+that teaches moves: handing out a `player_techniques` row would have made the
+starter move the one move in the game that came from nowhere, and the equipment
+page would have opened empty on a character who demonstrably owns a book.
+
+**What rolls is the Path, the technique and the name; the numbers do not.** The
+Tier 1 budget is always 4% attack and 2% cultivation — the same split the seeded
+Crimson Palm Canon uses. Luck belongs on what you find, not on what you are
+issued, and 0029 took the rolled split back out for that reason.
+
+Which Paths can arm a beginner is **derived, not listed**: the roller asks
+`techniques` for a rank 1, single-Path attack with power on it. 0028 shipped ten
+more of those — before it, the only ones were Blood and Fire, and a roll across
+two options is not a roll. Adding a rank 1 attack widens the roll with no edit
+to `grant_starter_manual`.
+
+It is granted by a **trigger on `confirmed_at`**, not by the bot's confirm
+handler: "every confirmed character owns a manual" is a rule about the data, and
+there are three doors into that state — the setup screen, `/dev reset`, and the
+tests. A rule enforced at one of the three holds until somebody uses another.
+
+### Who made a manual
+
+`manuals.created_by` NULL means the game wrote it; set means it belongs to one
+player, exactly as `techniques` has held canonical and player-made moves in one
+table since 0004. A **starter** manual has a maker and a NULL `harmony`; a
+**refined** one has a maker, a `refined_at` and a harmony.
+
+0028 loosened 0021's CHECK to allow that middle case, keeping the rule that
+matters: a manual claiming a refinement must say who did it and when. Leaving
+`created_by` NULL on a starter would have been the easy read and wrong twice —
+the row would outlive the player it was minted for, and `roll_manual_drop` reads
+NULL as *seeded content anyone may find*, so one player's starter book would
+have started turning up on corpses for everybody else.
+
+`harmony` is nullable rather than defaulting to 0 on purpose: a seeded manual
+was never refined, and 0 would read as *refined terribly*.
+
+### Every bonus is a percentage, and tier decides how much
+
+0021 gave manuals six bonus columns and left four page types — Attack, Speed,
+Breakthrough, Essence — with nowhere to land, so a manual refined from Attack
+pages would have expressed itself as a flat `+117 attack`. Two problems with
+that: nothing in this game reads a flat attack stat, and a flat number is worth
+less every realm you climb. **+117 is decisive at body level 1 and rounding
+error at body level 40.** A percentage is worth the same fraction forever.
+
+`manual_tiers` holds the total percentage a manual of each tier distributes.
+How that total is *split* across stats is what its pages were; the total is the
+tier's:
+
+| Tier | Budget | | Tier | Budget |
+|---:|---:|---|---:|---:|
+| 1 | 6% | | 6 | 36% |
+| 2 | 10% | | 7 | 45% |
+| 3 | 15% | | 8 | 56% |
+| 4 | 21% | | 9 | 68% |
+| 5 | 28% | | 10 | 82% |
+
+Rising faster than linearly, so the step from Tier 7 (the best that drops) to
+Tier 8 (the best that can only be refined) is worth the refining. It is a
+**target, not a cap** — harmony above 90 retains more than 100% of the pages'
+potential, which is the reward for refining well, so `manual_total_bonus()` is
+a function rather than a CHECK constraint.
+
+Of the twelve bonuses, eight are live: cultivation, physique training,
+attainment, attack, HP, defense, strength and gathering yield. Speed,
+breakthrough, essence and refinement are recorded and rendered **in italics**,
+because there is no turn-order system, no breakthrough roll, no essence spend
+and no refinement skill yet. A bonus that reads as live and does nothing is
+worse than one that says so.
+
+Attack reaches combat through the same external hook 0008 left for equipment —
+unweighted by Path, because how hard you hit is not a fact about a Path.
+
+### Pages, and who carries them
+
+**Only rogue cultivators drop pages.** A manual page is written by a person, so
+it comes off a person — no beast and no patch of ground yields one. 0025
+dropped `creature_page_drops` and `region_page_drops` outright rather than
+leaving them empty, because they encoded a rule that is no longer the rule and
+an unused table with a wrong idea in it is worse than no table.
+
+Rogues are `creature_species` rows with `kind = 'rogue'`, not a parallel enemy
+table — which is the whole reason they can be fought at all, since `hunt()`
+already resolves a fight against a species and a second enemy type would mean a
+second combat path to keep in step. What makes them rogues is the kind, the
+loot, and that you never choose to meet one: `spawn_rogue` gives every gather,
+hunt and explore a chance of being interrupted, weighted so a lawless region
+produces both more ambushes and worse ones. What they were carrying is bounded
+by their own rank — they were not holding anything they could not read.
+
+A page is an **instance**, not a template. Two Tier 4 Fire Attack pages differ
+by quality and by whether one of them is Resonant, and the design names
+per-page quality as one of its anti-meta variables.
+
+**Page power is denominated in the same units as a manual's tier budget.** A
+Tier 3 page averages 15 power; a Tier 3 manual distributes 15%. Not a
+coincidence — refinement sums the powers of its pages and the total decides the
+finished tier, so keeping the scales identical makes "these four pages are
+worth about a Tier 5 manual" arithmetic anyone can do rather than a curve they
+have to trust. A test asserts the two tables stay within 2 points of each other.
+
+Three rules live in data rather than in the roller:
+
+- **`page_tiers.roll_weight` is 0 for tiers 8–10.** They do not drop and must be
+  refined into existence. A zero weight rather than a range check means the
+  rule is visible in the table, and an inheritance that grants a Tier 8 page
+  later is an UPDATE.
+- **`page_types.manual_column`** says which manual bonus each type feeds, so
+  refinement reads a mapping instead of carrying a ten-branch CASE that has to
+  be edited beside every new bonus column.
+- **`page_types.is_live`** marks the four types — Speed, Breakthrough, Essence,
+  Refinement — whose bonuses nothing consumes yet.
+
+Ten traits (Ancient, Pure, Corrupted, Heaven-Touched, Resonant…) shift harmony,
+power and quality. Resonant's effect is conditional on *another* Resonant page
+being present, which no column can express, so it carries a
+`pairs_with_itself` flag for the refiner to ask about.
+
+`manual_pages.consumed_by` points at the manual a page became rather than the
+page being deleted — a manual is supposed to keep its creation history, and a
+deleted ingredient has none.
+
+### Refinement
+
+**Tier is what you put in; harmony is how much of it survived.** The pages'
+total power decides the manual's tier, and harmony multiplies the budget that
+tier grants. So the same five pages can become a Tier 8 manual worth 73% or a
+Tier 4 worth less than a Tier 2 — which is the design's central claim, that a
+skilled refiner with humble pages beats a novice holding treasure.
+
+Measured against the live tables:
+
+| Pages | Harmony | Result |
+|---|---:|---|
+| 3 matching Fire, novice | 68 | Tier 2, 88% retained, **9% of a 10% budget** |
+| Fire + Water + Water, novice | 32 | Tier 4, 50% retained, **10% of a 21% budget** |
+| Wisdom + Soul, skilled | 100 | Tier 6, 130% retained, **47% of a 36% budget** |
+| 5× Tier 6–7 Sword/Lightning | 112 | **Tier 8**, 73% — past what drops |
+
+**Path harmony is derived from the matchup chart**, with `path_affinities` for
+the exceptions. Two Paths the chart has rows about are Paths that push against
+each other, which is what makes them hard to write as one technique — and every
+conflicting pair the design names falls out of that for free. But Sword and
+Metal fight each other precisely *because* they are the same kind of thing,
+which is what makes them refine well; those cases live in the override table,
+beating the derived value the same way `creature_path_modifiers` beats the
+chart.
+
+`page_types.manual_column` says which bonus each page type pays into, so
+`apply_manual_bonus` reads a mapping instead of carrying a twelve-branch CASE.
+That is the one place this schema uses dynamic SQL, and the column name comes
+from a table the migration controls rather than from a caller.
+
+Failure destroys about a third of the pages and grants EXP anyway — the design
+is explicit that even a failure teaches. Consumed pages are **marked**, not
+deleted, so a manual can show what went into it.
+
+### Two views doing the work
+
+- **`player_manual_bonuses`** sums the equipped manuals. It is separate from
+  `player_trait_rates` because that view is what a character *is* — race, root,
+  body — and this is what they are *carrying*. They combine additively at the
+  point of use, so a +3% and a +12% manual make +15%, not +15.36%.
+- **`player_usable_techniques`** is learned techniques UNION what the equipped
+  manuals unlock. A view rather than copying rows into `player_techniques` on
+  equip, because unequipping would then have to work out which rows to take
+  back — and a learned move and a borrowed one would be indistinguishable the
+  first time that went wrong.
+
+Ten manuals are seeded, one per canonical technique, so every move in the game
+has a book it can come from. Until pages exist they are **found on bodies**:
+`roll_manual_drop` gates by the creature's rank, so a Central Continent rat
+cannot hand a new cultivator a rank 6 killing scripture, and never rolls a
+duplicate.
+
+The two-slot limit is a CHECK on `slot_index`, not a count the bot performs
+first — two commands racing would both pass a count and both equip.
+
+---
+
+## The starter roster
+
+46 rank 1 creatures across the five regions (0020), replacing the eight-species
+coverage set 0010 shipped to prove the mechanics. Those eight remain — they are
+still the only rank 3–9 content, and `/hunt` reaching a rank 5 elite in the
+Northern Plains is the point of the Northern Plains.
+
+**Every one of the 46 is rank 1.** A region's danger is expressed in its
+*stats*, not in a rank, because rank gates which techniques a player may hold
+and this whole tier is meant to be reachable by a new cultivator. Measured
+against the real damage functions — mean hits for a local creature to kill a
+fresh 120 HP / 20 defense character:
+
+| Region | Danger | Hits to kill you |
+|---|---:|---:|
+| Central Continent | 2 | 10.4 |
+| Eastern Sea | 3 | 8.3 |
+| Western Desert | 4 | 7.4 |
+| Southern Border | 4 | 7.5 |
+| Northern Plains | 5 | 5.8 |
+
+Monotonic, and measured rather than asserted.
+
+**Overrides are only for what the chart cannot say.** Where `path_matchups`
+already makes Fire strong into a Wood creature there is no override row — a
+redundant one is noise that will contradict the chart the first time the chart
+is retuned. The 34 that exist are facts about a body: a resistance to a Path
+the creature *is* (reflexive chart rows being banned), an immunity (which the
+chart cannot express at all), or a species quirk.
+
+### Metal, closed
+
+Metal spent eighteen migrations as a defender only, so Metal techniques were
+neutral into everything. 0020 gives it three advantages and three resistances,
+chosen to keep it distinct from Sword: Sword is the edge and the intent — it
+beats formation, soul and transformation and is resisted by bone, metal and
+strength, so abstractions cut and materials skid. Metal inverts that. It
+out-hardens bone, and it cannot touch soul, because an ingot is only heavy.
+
+Worth recording how the gap hid for so long: the invariant query INNER JOINs on
+`attacker_path`, so a Path with no attacking rows **drops out of the GROUP BY
+entirely**. Metal was never failing that constraint — it was invisible to it.
+`test_no_path_is_inert` now checks the thing the invariant could not see.
+
+---
+
+## The world
+
+Five regions in a cross, with the Central Continent in the middle.
+
+|  | central | western | eastern | northern | southern |
+|---|---:|---:|---:|---:|---:|
+| **central** | — | 2h | 2h | 2h | 2h |
+| **western** | 2h | — | **6h** | 4h | 4h |
+| **eastern** | 2h | **6h** | — | 4h | 4h |
+| **northern** | 2h | 4h | 4h | — | **6h** |
+| **southern** | 2h | 4h | 4h | **6h** | — |
+
+Each pair is stored **once**, with `CHECK (origin < destination)` forcing the
+canonical order, and `travel_hours(a, b)` normalises the lookup. Twenty rows
+that must agree with each other is twenty rows that eventually disagree — and
+the day they do is the day walking north takes longer than walking back.
+
+Travel is a claim on a span of time, resolved on arrival: `arrive()` runs at
+the top of every command that cares where you are. Nothing ticks, nothing
+schedules, and closing Discord mid-journey still gets you there. The three
+journey columns are all-or-nothing under a CHECK, because a half-set journey
+strands somebody between regions permanently.
+
+There is deliberately no "in transit" flag — being in transit *is* having a
+destination, so the two cannot disagree.
+
+### Two material economies
+
+The split is the design, so it is enforced by triggers rather than trusted:
+
+| | Source | Feeds | Table |
+|---|---|---|---|
+| **Gathering** | `/gather` in a region | The **base** of a Gu, in bulk | `region_materials` |
+| **Beast** | dropped by a kill | The **secondary** of a Gu; physique, when it exists | `creature_drops` |
+
+`materials` is one table with a `category`, because an inventory row, a stack
+and a display name are identical for both; what differs is where they come
+from, which is exactly what the two side tables express. A trigger on each
+rejects the wrong category, so a region can never hand out a fang — which
+would make hunting pointless — and a corpse can never yield a herb.
+
+77 gathering materials across the five regions, with **zero overlap**: nothing
+gatherable in one region is gatherable in another. That is what makes "which
+region" a real decision rather than flavour.
+
+Each carries a **Path** and an **emoji**, both as columns. The Path is what Gu
+refinement reads to decide whether an ingredient belongs; the emoji is what
+`/explore`, `/gather` and `/inventory` show, for the reason 0014 gives about
+`paths.emoji` — a dict in the bot is a second copy of the content that has to
+be edited beside every migration touching the first. A rarity dot says how
+lucky you were, which is not the same question as what you are holding, so it
+now rides with the rarity instead of standing in for the thing.
+
+### Hunting
+
+**You do not choose your quarry.** `/hunt` draws one species from the region
+with the same weighted sample gathering uses — `creature_regions.weight` was
+already *how often this turns up here*, so a rare beast stays rare and a common
+one is what you mostly meet. Hunting a named creature comes back later as its
+own command; the picker it replaced listed everything in the region and let a
+player skip past nine rank 1s straight to the rank 3 elite.
+
+That is also what put `hunt_cooldown_minutes` to work. It had sat in
+`game_config` since 0017 with nothing reading it: a menu you could reopen
+forever had no use for a cooldown, and a command that resolves a fight the
+moment you type it does. It is claimed after the refusals — travelling, no HP,
+no technique — so a hunt that could not happen does not cost the five minutes.
+
+`hunt()` resolves one encounter end to end in SQL, using
+`compute_technique_damage` and `compute_creature_damage` — the same two
+functions `/damage` previews with, so the preview and the fight cannot
+disagree. Every swing is written to `battle_actions` with its resolved
+numbers, so "why did that hit for 91?" is answered by reading the row.
+
+The player swings first, because they chose to start it. `base_speed` is
+sitting on every species waiting for a turn-order system to consume it.
+
+Losing costs the HP and nothing else. There is no death state: HP recovers on
+its own since 0015, and a permanent loss on a forward-only schema is not a
+thing to add casually. Hunting at 0 HP is refused.
+
+Winning rolls each of the species' drops, adds to `player_bestiary`, and
+records what the technique's Paths did to it as `discovered_via = 'combat'` —
+the hard way, as against the deduction `/study` records.
+
+One renderer draws every fight card, hunt and ambush alike. Two copies of it
+drifted apart once: the hunt side went on calling `roll_page_drops()` after
+0025 dropped that function, so every **won** fight raised and Discord answered
+*GuV2 didn't respond in time*. A lost fight rendered perfectly, and the test
+never asserted a win — which is how a broken command passed a suite.
+
+---
+
+## Gu
+
+**The aperture is a budget, not a slot count.** Every Gu costs some of it by
+`size`; your realm sets the capacity (`realms.gu_capacity`, 3 at Rank 1 Early,
+growing with rank and again at each peak). Six cheap Rank 1 Gu, or two
+expensive ones and room for nothing else — that is where a build comes from. A
+fixed eight slots would have made every build the same shape and reduced the
+question to which eight Gu are best.
+
+The rule is a trigger, not a count the caller performs: two commands racing
+would both pass a check and both equip.
+
+### Effects are rows
+
+The design spec asks for *"a general ability schema instead of hard-coding
+every Gu"*, and this is it:
+
+- **`gu_effects`** — the vocabulary, with `cap` and `is_live` on each
+- **`gu_type_effects`** — what each Gu says in that vocabulary
+- **`player_gu_stats`** — what is equipped, summed and already capped
+
+A new effect is a row plus one consumer. It is never a schema change, and an
+effect nothing reads yet (`shield`, `heal`, `resource_find`, `suppression`)
+says so on the screen rather than quietly doing nothing.
+
+**Every effect is capped**, because six crit Gu must not make a 100% crit rate.
+The cap is what stops one build being every build, and `player_gu_stats.capped`
+tells the screen when a player is wasting the ceiling.
+
+### The six axes pull against each other
+
+| Axis | Effect | Why it is not just "more damage" |
+| --- | --- | --- |
+| Many attacks | `multi_hit` | Extra strikes land at 55%, and **defence subtracts from every strike** |
+| Big hits | `attack_power` | One number, applied once — barely notices defence |
+| Armour pen | `armor_pen` | Worth most to the build that strikes three times |
+| Criticals | `crit_rate`, `crit_damage` | Rolled per strike, so it favours multi-hit; the damage half favours big hits |
+| Life steal | `lifesteal` | Scales with damage dealt, rides on either |
+| Evasion | `dodge`, `damage_reduction` | The answer to a telegraphed heavy move, which the battle screen shows you before you choose |
+
+That multi-hit wants penetration and big-hit does not is the whole reason there
+are two axes rather than one. Verified live: a 5★ `battle_bone_wheel` +
+`spiral_bone_spear_gu` build reads 70% extra strikes, 40% penetration, 30%
+attack and 16% life steal, and hits a 12-defence tortoise for 165 where the
+bare build managed 128.
+
+### Instances, not stacks
+
+`player_gu` is one row per Gu, and **duplicates do not merge**. That is
+deliberate: killer-move fusion will consume 10–100 Gu behind one leader, and a
+system that silently ate your tenth copy would have eaten the fodder for the
+thing the copies are for.
+
+Every instance carries **`harmony` (0–150), rolled at the moment it drops and
+read by nothing today**. Fusion will ask how well a pile combines, which is the
+question `pair_harmony()` already answers for refinement pages — storing it now
+means the Gu dropping today are usable in tomorrow's killer moves. Adding it
+afterwards would have made every Gu found before the feature worthless in it.
+
+### Where they come from
+
+35 Gu: the 26 regional drops from the monster roster, plus nine from the Gu
+catalog so each build axis has more than one source. `gu_region_drops` is
+weighted per region, gated so nothing hands out a Gu of a higher rank than the
+creature guarding it, and rare — 2% before the regional table. The roster
+document is explicit about why: **materials are the common drop because
+materials are what Gu refinement consumes**. That drip is the accident; the
+system below is how a Gu is meant to be got.
+
+---
+
+## Gu refining
+
+`/refinegu` is where a Gu actually comes from. Three ingredients, and each one
+has a job the other two cannot do.
+
+| | What it is | What it decides |
+|---|---|---|
+| **Base** | a gathering material, in bulk | the price, and it is most of it |
+| **Secondary** | a beast material, a fraction of the count | what the Gu becomes — a Wolf Enslavement Gu wants a wolf's fang in it |
+| **Auxiliary** | anything, any amount, optional | how good it is. **This is the only ingredient with a decision in it.** |
+
+0017 wrote that gathering materials feed Gu refinement and beast materials feed
+physique cultivation. That still holds — physique cultivation is unwritten and
+will have the beast economy to itself in bulk. Refining takes beast materials
+in small counts, as the thing that gives a heap of gold ore a nature. The split
+is enforced on the recipe by a trigger, the same way 0017 enforces which
+economy a drop table may name.
+
+### The price is two tables, not 35 typed numbers
+
+A recipe names **which** materials and never **how many**. Rank says how much
+of anything a Gu of that rank swallows; rarity says how much harder this one is
+to come by. The whole economy retunes in nine rows.
+
+| Rank | Base | Secondary | Refiner level |
+|---|---|---|---|
+| 1 | 8 | 4 | 1 |
+| 2 | 20 | 10 | 4 |
+| 3 | 45 | 22 | 9 |
+| 4 | 90 | 45 | 15 |
+| … | … | … | … |
+| 9 | 900 | 450 | 65 |
+
+…then ×1 common, ×1.5 uncommon, ×2.5 rare, ×4 epic, ×6 legendary. A Battle Bone
+Wheel is 540 skull stones and 270 bone fragments at Refiner level 15. A Bookworm
+is eight wisdom flowers and four pieces of lingzhi meat.
+
+### Materials have a Path now
+
+Without one there is no question to ask about an auxiliary beyond how much of
+it there is, and "put in more" is not a decision. With one, the matchup chart
+the whole game already runs on answers *does this belong in this Gu* for free —
+the same chart, through the same `pair_harmony`, that decides whether two pages
+refine.
+
+`material_affinity` is that lookup, with one deliberate difference: a Path
+against itself scores **+10** rather than the nothing `pair_harmony` returns.
+Manual refinement rewards repetition separately, through dominance. There is no
+dominance here, and a Fire material in a Fire Gu is the plainest good idea in
+the system.
+
+The bench says which is which in a word — *belongs*, *no quarrel*, *fights it*,
+*ruins it* — because a player should not have to lose thirty jade leaves to
+learn that Wood and Poison fight both ways.
+
+### Potency buys the ceiling, harmony decides how much you keep
+
+The same one idea manual refinement runs on.
+
+- **Potency** — rarity × measures, summed over the bench. A *measure* is three
+  units, and the third measure of the same material is the last that counts:
+  past that the only way up is a **different** material, which is what makes a
+  bench a composition rather than a pile.
+- **Harmony** — 50, plus what the base and the secondary contribute, plus your
+  Refiner level, plus every auxiliary's affinity times its measures, plus what
+  the auxiliaries make of *each other* (halved, or a bench of eight would be
+  decided entirely by the twenty-eight pairs among them), plus ±4.
+
+`gu_refine_grades` is one row per star with both thresholds on it, so the query
+is a single `max(stars) where both are met` — the lesser of the two ladders
+without anyone having to write a `LEAST`. That only reads as the lesser while
+both ladders climb, so a test pins that they do.
+
+Below **25 harmony** the Gu never forms and **half of every material** comes
+back. That is the risk that makes a hostile auxiliary a real choice rather than
+a free one, and it is the only way to fail.
+
+### Professions are sparse rows
+
+`player_professions`, keyed by `(player_id, profession)` — a second craft is an
+INSERT, not a migration that copies four columns and a level formula. Level
+gates which ranks you may attempt and how wide your bench is (2 auxiliaries at
+level 1, +1 every 4 levels, hard cap 8).
+
+`player_refinement` from 0026 stays where it is. Folding it in would mean
+rewriting `refine()`, which works, to buy nothing today — and these migrations
+are forward-only, so being wrong about that is permanent.
+
+### What the data said that the recipes did not
+
+0038 shipped 35 recipes that all read sensibly. Two queries over them said
+otherwise, and 0039 is the answer to both:
+
+- **One recipe fought itself.** All-Out Effort is a Strength Gu that asked for a
+  Blood base and a Soul secondary: −11 and −22 on the chart, a floor harmony of
+  17 against a threshold of 25. Every attempt would have failed and eaten half
+  of 180 blood flowers.
+- **Seven asked for something nobody could get.** Joining the recipes to
+  `creature_drops` and dividing gives the kills each secondary costs: they ran
+  from 12 to 440, and the Battle Bone Wheel wanted 270 bones off a rank 9
+  leviathan for a Gu gated at Refiner level 15. A price is a design decision. A
+  price nobody at that rank can pay is a recipe that is not in the game.
+
+Both checks are now tests over the whole table rather than notes about the rows
+that were edited. A third found eleven materials from the 0020 roster that
+0038's hand-written Path list never saw — silently worthless on a bench, which
+is the worst kind of wrong: the sort a player has to infer from a number that
+never moves.
+
+### Refined Gu are tradable
+
+`/trade` moves them like any other instance — see below.
+
+---
+
+## Trading
+
+`/trade @player` puts one message in the channel with two piles on it. Both
+players press the same buttons; which pile a press lands on is decided by who
+pressed it. The pickers open **ephemerally**, so each side only ever browses
+their own things.
+
+### The rule that shapes everything
+
+**Changing what you are offering clears both confirmations.** Every trade scam
+ever run is a variation on confirming a deal and then swapping the goods, so
+this cannot be a check in a command handler — it is a trigger on the offer
+tables, and it fires for the bot, for psql, and for anything that ever writes
+there.
+
+Ownership is checked twice: when an item goes on the table, so the screen can
+refuse with a sentence a player understands, and again inside `trade_execute`
+under lock, because minutes pass in between and a page can be refined away or a
+material spent.
+
+### Four offer tables, not one polymorphic one
+
+0023 made this call already, for the same reason: a polymorphic parent cannot
+carry a real foreign key, and every foreign key in this schema is declared. The
+four kinds are owned in four different shapes — a join row (`player_manuals`),
+an instance with an owner column (`manual_pages`), a quantity
+(`player_materials`), and an instance that is its own row (`player_gu`) — so one
+table pretending otherwise would only move the difference into the executor.
+
+`player_active_trade` is the one-trade-at-a-time claim, the same shape
+`player_active_battle` uses. Without it the same manual could be promised to two
+people, and whichever swap ran second would find it gone.
+
+### Gu, and the aperture
+
+`trade_offer_gu` is shaped exactly like `trade_offer_pages`, with one more block
+in `trade_execute` and the fourth branch the `trade_contents` view was left a
+note about in 0033. A Gu moves by `UPDATE` rather than the delete-and-insert a
+manual needs: `player_gu` *is* the instance, not a row saying who holds a shared
+one, so there is nothing for a collector to sweep and nothing to hand over
+before letting go.
+
+**An equipped Gu that changes hands comes out of the aperture** — and that rule
+is a trigger on `player_gu`, not a line in `trade_execute`. 0036's capacity
+trigger cannot catch this one: it fires `BEFORE INSERT` on
+`player_gu_equipped`, and a handover is an `UPDATE` somewhere else entirely.
+Left alone it would leave a row saying one player is wearing another player's
+Gu. Written into the swap instead, it would have been a rule that holds for the
+one path that happens to go through the swap.
+
+Both bodies are re-derived afterwards, because max HP reads what you are
+carrying and a Gu that granted some has just moved. The picker lists your spares
+first: an equipped Gu is somebody's build, and handing one over should take
+scrolling past the jar.
+
+**`trade_confirm` stopped counting tables.** It refused an empty trade by naming
+all three offer tables, so a trade with nothing on it but Gu would have been
+turned away as empty. It asks `trade_contents` now — the view is the list of
+what a trade can hold, so the fifth pile is a UNION branch and nothing else.
+
+### What trading broke, and what fixing it broke
+
+`manuals.created_by` CASCADEd, which was right while a refined manual could only
+sit in its maker's hands. The moment one can be traded, that cascade reaches
+into a stranger's collection and deletes a book they earned because somebody
+else closed their account. It is now `SET NULL`, and the whole-refinement CHECK
+no longer demands a refiner — a refined manual whose maker is gone still has a
+harmony and a date.
+
+That broke two things in turn, both caught by the suite:
+
+- **`created_by IS NULL` stopped meaning "seeded content".** An orphaned refined
+  manual answers to it too, so `roll_manual_drop` would have started handing a
+  dead player's work to strangers. The predicate is now `code IS NOT NULL`,
+  which is what seeded content has always actually meant.
+- **0028's guarantee that a starter manual dies with its owner.** Restored in
+  0034 by a collector that deletes a codeless manual once its *last owner* lets
+  go — ownership, not authorship, is what keeps one alive. `trade_execute` had
+  to be reordered to INSERT the taker's row before deleting the giver's, or the
+  collector takes the manual in the gap between the two.
+
+And 0034 turned up a landmine that had been sitting there since 0023:
+`manual_pages.consumed_by` is `ON DELETE SET NULL`, but the whole-consumption
+CHECK demanded `consumed_by` and `consumed_at` together — so deleting *any*
+refined manual violated the CHECK on the pages that made it. Nothing had ever
+deleted one until the collector did.
+
+---
+
+## Battles
+
+A fight is **a row in `battles` with status 'active'**, not an object in the
+bot. The view is a window onto it: it can time out, the process can restart,
+the message can scroll away, and `/battle` draws the fight again from where it
+stands. Nothing about a battle lives in Python.
+
+0007 built every column this needs — `status`, `turn_number`, per-combatant
+`current_hp` and `current_qi`, the `player_active_battle` claim that is the
+one-fight-at-a-time rule, and the append-only `battle_actions` log. 0017's
+`hunt()` then bypassed all of it, resolving fifty rounds in a single call and
+marking the battle complete before anyone could look. **0030 dropped
+`hunt()`**: two engines resolving one fight drift, and this schema has already
+paid that bill once.
+
+### A round
+
+The player acts, the creature answers, the turn number goes up — all inside
+one `battle_act` call, so a round cannot half-happen.
+
+**The creature's next move is rolled and shown before the player chooses.**
+That telegraph is the reason there are four actions instead of one: guarding a
+blow you can see coming is a decision, guarding a coin flip is not.
+
+| Action | What it costs | What it does |
+| --- | --- | --- |
+| **Attack** | qi, per the technique | Your moves are what your equipped manuals unlock, plus anything learned |
+| **Guard** | the round | Halves the telegraphed blow and returns 20% of your qi |
+| **Observe** | the round | Reads one undiscovered weakness — it still swings |
+| **Flee** | the round if it fails | A roll on realm difference |
+| *Killer Move* | — | Not built yet, and the button says so |
+
+### Qi finally costs something
+
+`techniques.qi_cost_pct` has been on every technique since 0004 with nothing
+reading it, and `battle_combatants.current_qi` has defaulted to 0 since 0007
+for want of a spender. A battle fills a pool from the realm's `qi_capacity`,
+and every technique bills against it — which is what stops the best move in
+your book being the only move you ever throw.
+
+The pool refills between fights. Qi *regeneration* is a different feature, and
+inventing half of one here would be worse than inventing none.
+
+### Creature moves
+
+`creature_moves` is keyed by **Path, not by species**: 46 species times three
+moves is 138 rows to maintain, while a Fire creature reaching for a Fire move
+covers all of them and the 47th for free. `path_code` NULL is a move anything
+with a body can make — teeth do not have a Path, and a fight where the enemy
+only ever reaches for its element reads like a spell list rather than an
+animal.
+
+### Fleeing
+
+`flee_base_chance + flee_rank_step × (your rank − its rank)`, clamped to 5–95%.
+Nothing is inescapable and nothing is a formality. Failing costs the round, so
+running is a gamble rather than a free retry.
+
+### The clamp in 0032
+
+`battle_combatants.max_hp` is a snapshot taken at the opening bell, which is
+0007's contract and the right one — a fight should not change shape because
+someone opened `/equipment` mid-round. But the *body's* max HP is live and can
+fall while a fight is open: unequip a manual with an HP bonus and
+`apply_physique_xp` recomputes a smaller pool.
+
+Writing the battle's HP back then violated `player_physique_hp_within_cap` —
+which does not merely fail a command, it makes that battle **impossible to
+conclude**, so the claim never releases and `/hunt` refuses forever. The test
+suite found it by restoring a pumped body while a fight was open, which is the
+same sequence a player performs with two clicks.
+
+---
+
+## Taking a hit
+
+`compute_technique_damage` (0008) covered player -> creature. 0015 adds the
+other direction and the base stats that make it mean anything.
+
+### Base stats
+
+A body level 1 character had **0 defense and 0 strength**, and that was
+structural rather than a low number: `apply_physique_xp` computed
+`def_rate * (level - 1)`, and no rate change or trait multiplier can rescue a
+zero. Only a base term can.
+
+| | Was | Now | Why |
+|---|---|---|---|
+| `physique_base_hp` | 100 | **120** | Buys a flee window: a rank 2 boar killed in 3 hits at 100, 4 at 120 |
+| `physique_base_defense` | — | **20** | Five body levels' worth, giving 100/(100+20) = 17% mitigation |
+| `physique_base_strength` | — | **30** | Five levels' worth. Deliberately feeds nothing yet |
+
+`physique_base_strength` is honest decoration for now. Strength has had no
+consumer since 0009, and wiring it into outgoing damage would be a fourth
+multiplicative system on top of attainment, matchup and traits. When it gets
+one it should be a flat **additive** term on `pre_defense`, so it cannot
+compound.
+
+### compute_creature_damage
+
+Mirrors 0008's five-stage shape and all four of its clamps, so `battle_actions`
+stores either direction in the same columns:
+
+    pre_defense = base_attack * creature_attack_scale * external
+    final       = pre_defense * dscale / (dscale + defense)
+    dscale      = defense_scale * creature_defense_scale_per_rank ^ (rank - 1)
+
+The rank term is the load-bearing part, and it is not a new system — it is the
+existing hyperbola given the one input it was missing.
+
+Without it, defense is rank-blind while **body level is gated only by
+wall-clock time** (6.25 hours per level, linear, uncapped) and realm is gated
+by a ~1.9x exponential. A pure idler therefore accrues unbounded mitigation
+against a *fixed* creature attack ladder. Measured against the live roster, an
+idler at body level 19 — 112 hours, no race or root bonuses, holding one rank 2
+technique — beat the rank 3 elite the design calls "unambiguously out of
+reach", 8 hits to 9. By day 60 the rank 9 world boss needed twelve hits to kill
+them.
+
+At `creature_defense_scale_per_rank = 2` that idler dies at level 19 and first
+wins at level 40, which is 244 hours — and the rank 3 realm unlocks at 247.6.
+So you beat a rank 3 creature within four hours of earning rank 3.
+
+**Rank 1 is untouched by the rank term** (2^0 = 1), so the Qi Condensation tier
+keeps exactly the numbers it was tuned to:
+
+| At body level 1 (120 HP, 20 defense) | Hits to kill you | Hits to kill it |
+|---|---:|---:|
+| Ash Moth (rank 1) | 8 | 2-3 |
+| Mire Toad (rank 1) | 10 | 4 |
+| Stone Hide Boar (rank 2) | 3 | 8 |
+| Frost-Maned Ape (rank 3 elite) | 2 | 14 |
+| Heaven Scourge Leviathan (rank 9) | 1 | — |
+
+### HP regeneration, and why it shipped in the same migration
+
+`player_physique.current_hp` had exactly one writer in the entire schema —
+`apply_physique_xp`, adding the `max_hp` delta on a level-up. It was
+monotonically increasing. There was no heal, no rest, no revive.
+`player_physique.regeneration` ("HP regenerated per minute out of combat",
+default 1) had sat unused since 0006, and `last_tick_at` beside it had never
+been read.
+
+So the moment anything could subtract HP, loss became **permanent**: four
+tutorial-tier fights would leave a character at 0 with no path back, and
+migrations are forward-only. Shipping the damage function alone would have been
+shipping that trap.
+
+`settle_passive_cultivation` now restores `paid * 60 * regeneration` HP,
+clamped by `least(max_hp, ...)`, after `apply_physique_xp` so a level gained in
+the same settle has already raised the cap. At the default rate a 45 HP fight
+costs 45 minutes of idle. It needs no new config row — the rate was already a
+per-player column — and it finally gives `last_tick_at` the consumer it was
+created for.
+
+---
+
+## Character creation
+
+Three independent traits, per the Races/Roots/Physiques design:
+
+| | What it is | How you get it |
+|---|---|---|
+| **Race** | What you are. 11 of them, humans and the variant-humans. | Chosen |
+| **Root** | Your affinity with the Dao. Common through Unique. | Rolled, 2 rerolls |
+| **Physique** | The body itself, including the Ten Extreme. | Rolled, 2 rerolls |
+
+They are independent on purpose: three small tables produce far more distinct
+characters than one list of pre-baked ones, and a Beastman with a Mountain
+Heart Root and a Great Strength True Martial Physique is a build nobody had to
+author.
+
+### Where the numbers live
+
+All three grant the same *kinds* of bonus, so all three are read the same way:
+
+- Bonuses that apply to everything are columns on the trait —
+  `cultivation_rate_bonus`, `attainment_rate_bonus`, `hp_bonus`.
+- Bonuses that apply to **one Path** are rows in a side table
+  (`race_path_bonuses`, `root_path_bonuses`, `physique_path_bonuses`). "How
+  much does this character gain in Fire" is summed on every accrual, so it has
+  to be joinable rather than buried in JSONB.
+- Three tables rather than one polymorphic table with a `source_kind` column,
+  because a polymorphic parent cannot have a real foreign key and every FK in
+  this schema is declared.
+
+`player_trait_rates` sums the flat half once; `player_attainment_rate(player,
+path)` adds the per-Path half. Everything is **additive** — three sources of
++10% make +30%, not +33.1%. Multiplying independent percentages is how a game
+ends up with a build that is accidentally 40× everything else.
+
+### Rolling
+
+`roll_root()` and `roll_physique()` are weighted draws in one pass: a band's
+weight divided among its members, ordered by `-ln(random()) / weight`. A band
+with **no members contributes nothing and the rest renormalise**, which is what
+makes it safe to ship a `mythic` band with no roots in it yet — and what
+kept that band invisible for eight migrations. An evolved form
+is excluded by being the target of an evolution, not by a flag.
+
+Measured over 20,000 rolls the bands land at 45.3 / 27.7 / 15.8 / 7.0 / 3.65 /
+0.44 / 0.11 % against a design of 45 / 28 / 15 / 7 / 3.5 / 0.5 / 0.1. `/traits`
+publishes the odds — a roll nobody can check is a roll players assume is rigged.
+
+### The Divine band
+
+Eight bands now, not seven: **Common, Uncommon, Rare, Epic, Legendary, Mythic,
+Divine, Unique**, with Extreme sitting outside the ladder for the Ten Extreme
+physiques. That is not a new invention — the design spec's own ladder has read
+that way from the start, and its §7.7 *Divine Roots* and §10.7 *Divine
+Physiques* had been sitting there unbuilt.
+
+**A band with no members never comes up**, which Mythic has been quietly
+proving since it shipped: 1.4 weight, zero roots, zero physiques, never rolled
+once. So the band arrived with four roots and four physiques rather than on its
+own.
+
+How a tier shows its rank here is decided by what this game already does:
+
+- **Roots carry no flat rates at all.** All twenty-three have 0 in every rate
+  column and put their identity in `root_path_bonuses`, which is the spec's own
+  correction from its opening pages — higher rarity should be *"strategically
+  distinct rather than numerically dominant"*. So a Divine root is the widest
+  and deepest Path package in the game (0.40 attainment on its primary against
+  Legendary's 0.30 and Unique's 0.50, plus a real second Path at half) and not
+  the one root that makes every number bigger.
+- **Physiques do carry multipliers**, so those follow the physique baseline:
+  +25% on the stat the name promises.
+- **What is not wired says so.** Breakthrough backlash, secret-realm clues and
+  flee rerolls have nowhere to land yet, so they go in `unmodelled` and render
+  in italics under *"designed but not yet wired to a system"*. A test asserts
+  every Divine trait declares something there, because a tier this rare must
+  not claim an effect nothing reads.
+
+A second test cross-checks the bot's `RARITY_MARK` against the rarity table.
+The screen colours a band by dict lookup, so one added to the database without
+an entry renders as nothing at all — which is how a Divine root would have
+arrived looking Common.
+
+### The middle of the physique ladder
+
+Epic, Legendary and Mythic had no physiques at all, so **25.5% of the physique
+roll's weight sat in bands that could never award anything** and a good roll
+returned Rare or nothing. 0049 fills them, four each, from the spec's §10.4–6:
+
+| Band | Peak stat | Whole package | Path attainment |
+|---|---|---|---|
+| Rare | 1.15 | 3.25 | 0.00 |
+| Epic | 1.16 | 3.37 | 0.12 |
+| Legendary | 1.18 | 3.46 | 0.20 |
+| Mythic | 1.22 | 3.59 | 0.25 |
+| Divine | 1.25 | 3.60 | 0.30 |
+| Extreme | 1.40 | 3.70 | 0.50 |
+
+Rare physiques give damage and no attainment; Extreme gives half again of both.
+**Attainment is what carries the ladder** between them, with the second Path at
+half of the first.
+
+**Unique stays empty and that is correct.** The spec's §10.8 "Unique Physiques"
+lists Great Strength True Martial, Northern Dark Ice Soul, Blazing Glory
+Lightning Brilliance and Carefree Wisdom Heart — which are this game's
+`extreme` band, put outside the ladder by 0011 on purpose. Unique is the
+roots-only band.
+
+#### An Epic body was weaker than a Rare one
+
+0049 took Epic's +14% straight from the spec's baseline without checking it
+against the Rare physiques that actually shipped, which reach **+15%**. Blood
+Tyrant Body beat every Epic body's best stat, so a player climbing the ladder
+would have watched their headline number go down. The spec says itself that
+those baselines are a starting point for simulation; the ladder that has to
+hold is the one in the database. 0050 moves Epic to 1.16 and nothing else.
+
+Two tests now guard it — the peak stat and the whole package — because the
+first caught this and the second would not have: Epic's *total* was already
+ahead of Rare's. It was the one number a player compares that read wrong.
+
+### Damage bonuses, and the hook they arrive through
+
+0008 left `p_external_multiplier` on `compute_technique_damage` as the hook for
+"Dao Marks, equipment and buffs", to be passed 1 until those existed. The three
+traits' damage bonuses are the first thing to come through it, weighted by the
+technique's own Path weights — so a Sword/Fire move gets half of a Sword bonus,
+the same weighting `technique_attainment_bonus` uses and for the same reason.
+
+A Snowman with the Northern Dark Ice Soul Physique resolves to ×2.23 Ice
+attainment and ×1.50 Ice damage, and `/damage` shows the Traits line
+separately so it can be checked rather than believed.
+
+### Known gaps
+
+- **Four Paths the design names do not exist here** — Cloud, Information, Sound
+  and Snow. Each is mapped to its nearest existing Path (`space`, `wisdom`,
+  `soul`, `ice`) rather than adding four Paths that would sit outside the
+  matchup chart the way Metal currently does. **Sound → Soul is the weak one.**
+  The mapping is one table, so a real Sound Path is a row change.
+- **Effects with no system yet are recorded, not applied.** Evasion, crit, Gu
+  refinement, drop rates, cooldowns and resistances live in an `unmodelled`
+  JSONB column and render in italics with a footnote. Silently listing a bonus
+  that does nothing is worse than not listing it.
+- **Aperture Instability is a flag and a warning line.** The Ten Extreme carry
+  the drawback in the design; there is no instability system behind it yet.
+- **Six of the Ten Extreme are unspecified.** The design gives four.
+- **Root evolution (design §7) is data, not a mechanic.** `roots.evolves_into`
+  carries the one example line (Ember → Blazing Yang → Heavenly Flame); nothing
+  triggers it yet.
 
 ---
 

@@ -12,5 +12,11 @@ venv/
 
 # Local scratch
 *.log
+# Rotated logs too: `*.log` does not match `gu-bot.log.2`, and a megabyte of
+# runtime logging was about to be published because of it.
+*.log.*
 /tmp/
 .DS_Store
+# Ad-hoc queries kept at the root while working something out. Underscore
+# prefix is the convention; un-ignore one if it turns out to be worth keeping.
+/_*.sql

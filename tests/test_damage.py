@@ -20,10 +20,182 @@ def set_attainment(conn, player_id, path_code, tier):
 
 
 def damage(conn, player_id, technique_id, species_id, *, external=1, defense=0):
+    # Named rather than `*`: every caller here unpacks five stages
+    # positionally and 0245 added `body_power` as a sixth. Asking for what
+    # is unpacked keeps a new column from being a thirteen-site edit.
     return conn.execute(
-        "SELECT * FROM compute_technique_damage(%s, %s, %s, %s, %s)",
+        "SELECT base_power, attainment_bonus, matchup_modifier, "
+        "       pre_defense, final_damage "
+        "FROM compute_technique_damage(%s, %s, %s, %s, %s)",
         (player_id, technique_id, species_id, external, defense),
     ).fetchone()
+
+
+# ---------------------------------------------------------------------------
+# The sum of a technique and a body
+# ---------------------------------------------------------------------------
+
+
+def test_a_deep_swing_does_not_overflow_an_integer(conn, make_player,
+                                                    make_technique, make_species):
+    """0392. `raw := (tech_base + thews) * ...` had both terms declared INTEGER,
+    so the ADDITION overflowed before anything was multiplied.
+
+    It was live: pashu0's own Ascendant Refinement Art came to 1,834,454,352 of
+    technique and 934,054,724 of body, and the only reason nobody saw a
+    database error mid-fight is that he had not equipped the manual.
+
+    The numbers here are deliberately past INT_MAX on the sum while each term
+    is under it, because that is the shape of the bug - clamping one side and
+    adding an unclamped one to it.
+    """
+    player_id = make_player()
+    species_id = make_species("plain_beast", paths=["strength"])
+    technique_id = make_technique(
+        "deep_swing_fixture", paths={"blood": "1.0"}, base_power=2_000_000_000
+    )
+
+    conn.execute(
+        "INSERT INTO player_physique (player_id, physique_id) VALUES "
+        "(%s, (SELECT physique_id FROM physiques ORDER BY physique_id LIMIT 1)) "
+        "ON CONFLICT (player_id) DO NOTHING",
+        (player_id,),
+    )
+    conn.execute(
+        "UPDATE player_physique SET strength = 900000000 WHERE player_id = %s",
+        (player_id,),
+    )
+
+    row = damage(conn, player_id, technique_id, species_id)
+    assert row is not None, "the swing came back with nothing"
+    assert row[4] > 0, "a two-billion technique behind a real body did nothing"
+
+    # And the two terms are handed back wide, not truncated on the way out.
+    base, body = conn.execute(
+        "SELECT base_power, body_power FROM compute_technique_damage(%s, %s, %s, 1, 0)",
+        (player_id, technique_id, species_id),
+    ).fetchone()
+    assert base == 2_000_000_000
+    assert body >= 900_000_000
+
+
+def test_every_column_the_damage_pipeline_writes_is_wide_enough(conn):
+    """A number that fits in the function and not in the row it is logged to is
+    the same bug one table along. `battle_actions.base_power` is where a duel
+    writes what `compute_technique_damage` just handed it."""
+    narrow = conn.execute(
+        """
+        SELECT c.table_name, c.column_name, c.data_type
+        FROM information_schema.columns c
+        WHERE c.table_schema = 'public'
+          AND (c.table_name, c.column_name) IN (('battle_actions', 'base_power'))
+          AND c.data_type <> 'bigint'
+        """
+    ).fetchall()
+    assert narrow == [], narrow
+
+    returns = conn.execute(
+        "SELECT pg_get_function_result(oid) FROM pg_proc "
+        "WHERE proname = 'compute_technique_damage'"
+    ).fetchone()[0]
+    assert "base_power bigint" in returns, returns
+    assert "body_power bigint" in returns, returns
+
+
+def test_the_screens_and_the_swing_read_one_number(conn, make_player,
+                                                   make_technique, make_species):
+    """0395. `techniques.base_power` is a souvenir of the day a technique was
+    made; a forged or fated one stores a GRADE and is recomputed against its
+    owner's current realm every swing.
+
+    Five screens printed the souvenir, and it had drifted by up to 128x - the
+    technique picker in a fight showed a 28,663,349 move beside a 1,852,204,646
+    one when the first was the stronger of the two.
+
+    Both now ask `technique_power_for`, and this is what keeps them one number:
+    it compares the function against what the damage pipeline actually used.
+    """
+    player = make_player()
+    species = make_species("power_probe_beast", paths=["strength"])
+    # No code: `techniques_canonical_has_code` insists that a technique
+    # somebody made has none, and one nobody made has one.
+    technique = make_technique(
+        None, name="Power Probe", paths={"blood": "1.0"}, base_power=1000,
+        created_by=player,
+    )
+    conn.execute(
+        "INSERT INTO player_cultivation (player_id, realm_id) VALUES (%s, 1) "
+        "ON CONFLICT (player_id) DO NOTHING",
+        (player,),
+    )
+    conn.execute(
+        "INSERT INTO player_physique (player_id, physique_id) VALUES "
+        "(%s, (SELECT physique_id FROM physiques ORDER BY physique_id LIMIT 1)) "
+        "ON CONFLICT (player_id) DO NOTHING",
+        (player,),
+    )
+
+    # Unforged: worth exactly what is written on it, which for a canonical
+    # technique is the true number and always was.
+    assert conn.execute(
+        "SELECT technique_power_for(%s, %s)", (player, technique)
+    ).fetchone()[0] == 1000
+
+    # Forged: the written figure stops being the answer.
+    conn.execute(
+        """
+        INSERT INTO technique_forges
+            (player_id, realm_rank, power_grade, dual, paths, step,
+             technique_id, finished_at)
+        VALUES (%s, 10, 2.0, FALSE, ARRAY['blood'], 3, %s, now())
+        """,
+        (player, technique),
+    )
+    live = conn.execute(
+        "SELECT technique_power_for(%s, %s)", (player, technique)
+    ).fetchone()[0]
+    assert live != 1000, "a forged technique is still worth its souvenir"
+
+    # And the pipeline agrees, which is the invariant - one definition, not two.
+    assert conn.execute(
+        "SELECT base_power FROM compute_technique_damage(%s, %s, %s, 1, 0)",
+        (player, technique, species),
+    ).fetchone()[0] == live
+
+    # Climbing a realm moves it, because that is the entire point.
+    conn.execute(
+        """
+        UPDATE player_cultivation SET realm_id =
+            (SELECT realm_id FROM realms WHERE rank = 2 ORDER BY realm_id LIMIT 1)
+        WHERE player_id = %s
+        """,
+        (player,),
+    )
+    assert conn.execute(
+        "SELECT technique_power_for(%s, %s)", (player, technique)
+    ).fetchone()[0] > live, "a realm crossing did not reach the technique"
+
+
+def test_no_screen_orders_or_prints_a_stored_technique_power(conn):
+    """The souvenir is not a thing a screen may reach for. Five did; a sixth is
+    the thing to catch, which is why this reads the source rather than the
+    database."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in sorted((root / "bot").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("--") or line.lstrip().startswith("#"):
+                continue
+            # Selecting or ordering by the column. `t.base_power > 0` is a
+            # presence test - a technique with no power of its own is not an
+            # attack - and says nothing about how strong anything is.
+            if re.search(r"\bt\.base_power\b", line) and "base_power > 0" not in line:
+                offenders.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
+    assert offenders == [], "\n".join(offenders)
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +207,7 @@ def test_spec_section_3_blood_blade_example(conn, make_player, make_technique, m
     target +25% => exactly 15,000."""
     player_id = make_player()
     set_attainment(conn, player_id, "blood", 6)  # Grandmaster
-    technique_id = make_technique("blood_blade", paths={"blood": "1.0"}, base_power=10_000)
+    technique_id = make_technique("blood_blade_fixture", paths={"blood": "1.0"}, base_power=10_000)
     # Blood beats Strength in the chart, so a Strength creature is vulnerable.
     species_id = make_species("strength_beast", paths=["strength"])
 
@@ -214,14 +386,28 @@ def test_external_multiplier_hook_applies(conn, make_player, make_technique, mak
 
 
 def test_defense_has_diminishing_returns(conn, make_player, make_technique, make_species):
-    """defense_scale=100: 100 defense halves damage, and no value zeroes it."""
+    """Defence divides, it never subtracts - so it can soften a blow without
+    ever erasing one.
+
+    The scale moved from 100 to 60 in 0248 so a defence stat soaks about a
+    quarter of an equal-rank blow at every rank instead of decaying up the
+    ladder, so the shape is asserted against the dial rather than against the
+    three numbers it used to produce."""
     player_id = make_player()
     technique_id = make_technique("def_test", paths={"fire": "1.0"}, base_power=10_000)
     species_id = make_species("armored_target", paths=["human"])
 
+    scale = int(
+        conn.execute("SELECT game_config_value('defense_scale')").fetchone()[0]
+    )
+
     assert damage(conn, player_id, technique_id, species_id, defense=0)[4] == 10_000
-    assert damage(conn, player_id, technique_id, species_id, defense=100)[4] == 5_000
-    assert damage(conn, player_id, technique_id, species_id, defense=300)[4] == 2_500
+    # Defence equal to the scale is exactly half.
+    assert damage(conn, player_id, technique_id, species_id, defense=scale)[4] == 5_000
+    # Three times the scale is a quarter.
+    assert damage(
+        conn, player_id, technique_id, species_id, defense=scale * 3
+    )[4] == 2_500
     # Absurd defense still cannot reduce a landed hit below 1 (chip damage).
     assert damage(conn, player_id, technique_id, species_id, defense=10_000_000)[4] == 1
 
@@ -256,9 +442,147 @@ def test_breakdown_multiplies_through(conn, make_player, make_technique, make_sp
     technique_id = make_technique("full_stack", paths={"blood": "1.0"}, base_power=10_000)
     species_id = make_species("full_stack_target", paths=["strength"])  # +25% matchup
 
-    base, attainment, matchup, pre, final = damage(
-        conn, player_id, technique_id, species_id, external="1.10", defense=100
+    scale = int(
+        conn.execute("SELECT game_config_value('defense_scale')").fetchone()[0]
     )
-    # 10,000 * 1.20 * 1.25 * 1.10 = 16,500 pre-defense; halved by 100 defense.
+    base, attainment, matchup, pre, final = damage(
+        conn, player_id, technique_id, species_id, external="1.10", defense=scale
+    )
+    # 10,000 * 1.20 * 1.25 * 1.10 = 16,500 pre-defense; defence equal to the
+    # scale halves it, whatever the scale currently is.
     assert pre == Decimal("16500.0000000000")
     assert final == 8_250
+
+def test_nothing_in_the_damage_path_narrows_a_power(conn):
+    """The 32-bit ceiling has been found four times in two days, and every time
+    by somebody hitting it rather than by looking:
+
+        0392  compute_technique_damage's locals and returns
+        0392  battle_actions.base_power
+        0394  techniques.base_power and both writers
+        0403  battle_act casting back down into the column 0392 had widened -
+              which read to the player as "GuV2 didn't respond in time"
+
+    So this sweeps instead of waiting. A cast to integer on a line that names a
+    power, a damage or a body's strength is the shape of all four.
+    """
+    # Narrow RETURN COLUMNS. 0403 swept for casts; 0404 found the same
+    # mistake wearing a different hat - a plpgsql RETURN QUERY matches its
+    # declared shape exactly, so a column still typed integer breaks the
+    # whole function the moment the value it selects is widened underneath
+    # it. That is what stopped m_i_y_u_k_i refining.
+    returns = conn.execute(
+        r"""
+        SELECT p.proname, pg_get_function_result(p.oid)
+        FROM pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace
+          AND p.prorettype = 'record'::regtype
+          AND pg_get_function_result(p.oid) ~ '(power|damage|attack|thews) integer'
+          AND p.prosrc ~ 'RETURN QUERY'
+        ORDER BY 1
+        """
+    ).fetchall()
+    assert returns == [], returns
+
+    # And narrow LOCALS reading a column that is not one.
+    held = conn.execute(
+        r"""
+        SELECT proname FROM pg_proc
+        WHERE pronamespace = 'public'::regnamespace
+          AND prosrc ~ 'atk\s+INTEGER|tech_base\s+INTEGER|thews\s+INTEGER'
+        ORDER BY 1
+        """
+    ).fetchall()
+    assert held == [], held
+
+    narrow = conn.execute(
+        r"""
+        SELECT p.proname, trim(l.line)
+        FROM pg_proc p
+        CROSS JOIN LATERAL unnest(string_to_array(p.prosrc, chr(10))) AS l(line)
+        WHERE p.pronamespace = 'public'::regnamespace
+          AND l.line ~ '::integer'
+          AND l.line ~* 'power|damage|dealt|thews'
+          AND l.line !~ '^\s*--'
+        ORDER BY 1
+        """
+    ).fetchall()
+    assert narrow == [], narrow
+
+
+def test_the_deepest_cultivator_can_actually_swing(conn, make_player,
+                                                    make_technique, make_species):
+    """0403. Driven end to end through `battle_act` rather than through the
+    damage function alone, because the crash was not in the arithmetic - it was
+    in writing the answer down afterwards."""
+    player = make_player()
+    species = make_species("swing_probe_beast", paths=["strength"])
+    technique = make_technique(
+        None, name="Swing Probe", paths={"blood": "1.0"}, base_power=1000,
+        created_by=player,
+    )
+    conn.execute(
+        "INSERT INTO player_cultivation (player_id, realm_id, qi) VALUES (%s, 1, 0) "
+        "ON CONFLICT (player_id) DO NOTHING",
+        (player,),
+    )
+    conn.execute(
+        "INSERT INTO player_physique (player_id, physique_id) VALUES "
+        "(%s, (SELECT physique_id FROM physiques ORDER BY physique_id LIMIT 1)) "
+        "ON CONFLICT (player_id) DO NOTHING",
+        (player,),
+    )
+    conn.execute(
+        "INSERT INTO player_techniques (player_id, technique_id) VALUES (%s, %s)",
+        (player, technique),
+    )
+
+    # A grade that puts the live power well past INT_MAX, which is the state
+    # pashu0 was actually in.
+    conn.execute(
+        """
+        INSERT INTO technique_forges
+            (player_id, realm_rank, power_grade, dual, paths, step,
+             technique_id, finished_at)
+        VALUES (%s, 14, 4.0, FALSE, ARRAY['blood'], 3, %s, now())
+        """,
+        (player, technique),
+    )
+    # The forge row's `realm_rank` is only a record of where it was made -
+    # `technique_power_for` recomputes from where the owner stands NOW, so the
+    # player has to actually be deep or the fixture never reaches the ceiling
+    # it exists to test.
+    conn.execute(
+        """
+        UPDATE player_cultivation pc
+        SET realm_id = (SELECT max(realm_id) FROM realms)
+        WHERE pc.player_id = %s
+        """,
+        (player,),
+    )
+    conn.execute(
+        """
+        UPDATE player_physique pp
+        SET body_rank = 12, physique_xp = 400000,
+            max_hp = 5000000000, current_hp = 5000000000, strength = 900000000
+        WHERE pp.player_id = %s
+        """,
+        (player,),
+    )
+    conn.execute(
+        "UPDATE player_cultivation pc SET qi = player_max_qi(pc.player_id) "
+        "WHERE pc.player_id = %s",
+        (player,),
+    )
+
+    assert conn.execute(
+        "SELECT technique_power_for(%s, %s)", (player, technique)
+    ).fetchone()[0] > 2_147_483_647, "the fixture is not past the old ceiling"
+
+    battle = conn.execute(
+        "SELECT battle_open(%s, %s)", (player, species)
+    ).fetchone()[0]
+    dealt = conn.execute(
+        "SELECT dealt FROM battle_act(%s, 'attack', %s)", (battle, technique)
+    ).fetchone()[0]
+    assert dealt > 0, "the swing landed nothing"
